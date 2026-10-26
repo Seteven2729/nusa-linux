@@ -123,8 +123,8 @@ window { background: transparent; }
 .notch button:hover { background: rgba(255,255,255,0.15); }
 .notch button.play { background: #fff; color: #061338; }
 .notch button.play:hover { background: #dce8ff; }
-.notch button.lyrics-toggle { min-width: 30px; min-height: 30px; opacity: 0.6; }
-.notch button.lyrics-toggle:checked { opacity: 1; background: rgba(255,255,255,0.15); }
+.notch button.panel-toggle { min-width: 30px; min-height: 30px; opacity: 0.6; }
+.notch button.panel-toggle:checked { opacity: 1; background: rgba(255,255,255,0.15); }
 
 .notch scrolledwindow, .notch list, .notch row { background: none; }
 .notch row { padding: 0; border-radius: 6px; }
@@ -161,6 +161,7 @@ struct Ui {
     mic: gtk::Label,
     stats: gtk::Label,
     clips: gtk::Box,
+    clip_btn: gtk::ToggleButton,
     accent: gtk::CssProvider,
 }
 
@@ -323,13 +324,23 @@ fn build_ui(app: &gtk::Application) {
     let lyrics_btn = gtk::ToggleButton::builder()
         .icon_name("format-justify-left-symbolic")
         .tooltip_text("Lirik")
-        .css_classes(["lyrics-toggle"])
+        .css_classes(["panel-toggle"])
         .valign(gtk::Align::Center)
         .build();
     let head = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     head.append(&art);
     head.append(&text);
     head.append(&lyrics_btn);
+    // Clipboard history stays behind a button so it never shows up unasked (screen sharing),
+    // and so the idle notch doesn't grow wide.
+    let clip_btn = gtk::ToggleButton::builder()
+        .icon_name("edit-paste-symbolic")
+        .tooltip_text("Clipboard")
+        .css_classes(["panel-toggle"])
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    head.append(&clip_btn);
 
     let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 14);
     buttons.set_halign(gtk::Align::Center);
@@ -341,9 +352,12 @@ fn build_ui(app: &gtk::Application) {
     // Idle extras under the big clock: system stats and recent clipboard items.
     let stats = gtk::Label::builder().css_classes(["stats"]).build();
     let clips = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    clips.set_width_request(260);
+    clips.set_margin_top(10);
+    clips.set_valign(gtk::Align::Start);
+    clips.set_visible(false);
     body.append(&head);
     body.append(&stats);
-    body.append(&clips);
     body.append(&seek_row);
     body.append(&buttons);
     // Full lyrics sit to the right of the player when the lyrics button is on.
@@ -361,6 +375,7 @@ fn build_ui(app: &gtk::Application) {
     let split = gtk::Box::new(gtk::Orientation::Horizontal, 16);
     split.append(&body);
     split.append(&lyrics_scroll);
+    split.append(&clips);
     let expanded = gtk::Revealer::builder()
         .transition_type(gtk::RevealerTransitionType::SlideDown)
         .transition_duration(200)
@@ -397,6 +412,7 @@ fn build_ui(app: &gtk::Application) {
         mic,
         stats,
         clips,
+        clip_btn,
         accent: gtk::CssProvider::new(),
     };
     // Cover-tinted gradient lives in its own provider so it can be swapped per track.
@@ -418,6 +434,8 @@ fn build_ui(app: &gtk::Application) {
     });
     let (u, s) = (ui.clone(), state.clone());
     ui.lyrics_btn.connect_toggled(move |_| refresh_compact(&u, &s.borrow()));
+    let (u, s) = (ui.clone(), state.clone());
+    ui.clip_btn.connect_toggled(move |_| refresh_compact(&u, &s.borrow()));
     let s = state.clone();
     ui.lyrics_list.connect_row_activated(move |_, row| {
         let ms = s.borrow().lyrics.get(row.index() as usize).map(|l| l.0);
@@ -480,6 +498,7 @@ fn build_ui(app: &gtk::Application) {
     });
     hover.connect_leave(move |_| {
         u2.expanded.set_reveal_child(false);
+        u2.clip_btn.set_active(false);
         refresh_compact(&u2, &s2.borrow());
     });
     notch.add_controller(hover);
@@ -630,7 +649,9 @@ fn refresh_compact(ui: &Ui, st: &State) {
     ui.lyric.set_visible(st.playing && !st.lyrics.is_empty() && st.alert.is_none() && !full_lyrics);
     ui.lyric_rom.set_visible(ui.lyric.is_visible() && st.lyrics_rom.iter().any(Option::is_some));
     ui.stats.set_visible(!has_track);
-    ui.clips.set_visible(!has_track && ui.clips.first_child().is_some());
+    let has_clips = ui.clips.first_child().is_some();
+    ui.clip_btn.set_visible(!has_track && has_clips);
+    ui.clips.set_visible(open && !has_track && has_clips && ui.clip_btn.is_active());
     if has_track && ui.art.paintable().is_some() {
         ui.notch.add_css_class("tinted");
     } else {
@@ -852,9 +873,16 @@ async fn refresh_player(ui: &Ui, state: &Shared) {
         let (ui, state) = (ui.clone(), state.clone());
         glib::spawn_future_local(async move {
             let t = title.clone();
-            let lyrics = gio::spawn_blocking(move || fetch_lyrics(&t, &artist, length_s)).await.unwrap_or_default();
-            if state.borrow().track == title {
+            // Fetch and romanize off the main thread: lrclib can take seconds, and kakasi
+            // loads its dictionary on first use.
+            let (lyrics, rom) = gio::spawn_blocking(move || {
+                let lyrics = fetch_lyrics(&t, &artist, length_s);
                 let rom = romanize_song(&lyrics);
+                (lyrics, rom)
+            })
+            .await
+            .unwrap_or_default();
+            if state.borrow().track == title {
                 for ((_, line), r) in lyrics.iter().zip(&rom) {
                     let text = if line.is_empty() { "♪".to_string() } else { glib::markup_escape_text(line).to_string() };
                     let markup = match r {
@@ -1252,7 +1280,11 @@ async fn clipboard_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
             }
             let short: String = if flat.chars().count() > 40 { flat.chars().take(40).collect::<String>() + "…" } else { flat };
             let btn = gtk::Button::builder().label(format!("📋  {short}")).css_classes(["clip"]).build();
-            btn.child().and_then(|c| c.downcast::<gtk::Label>().ok()).inspect(|l| l.set_xalign(0.0));
+            btn.child().and_then(|c| c.downcast::<gtk::Label>().ok()).inspect(|l| {
+                l.set_xalign(0.0);
+                l.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                l.set_max_width_chars(28);
+            });
             let k = klipper.clone();
             btn.connect_clicked(move |_| {
                 let (k, item) = (k.clone(), item.clone());
@@ -1353,7 +1385,7 @@ fn spawn_mic_watch(ui: &Ui, state: &Shared) {
 }
 
 /// Romanize every line with one script decision for the whole song, so a Japanese song's
-/// kanji-only lines aren't read as Mandarin. Japanese itself is left as-is for now.
+/// kanji-only lines are read as Japanese, not Mandarin.
 fn romanize_song(lyrics: &[(i64, String)]) -> Vec<Option<String>> {
     let has_kana = lyrics.iter().any(|(_, l)| l.chars().any(|c| ('\u{3040}'..='\u{30ff}').contains(&c)));
     lyrics
@@ -1362,7 +1394,10 @@ fn romanize_song(lyrics: &[(i64, String)]) -> Vec<Option<String>> {
             let r = if l.chars().any(is_hangul) {
                 romanize_korean(l)
             } else if has_kana {
-                return None;
+                if !l.chars().any(|c| is_han(c) || ('\u{3040}'..='\u{30ff}').contains(&c)) {
+                    return None;
+                }
+                romanize_japanese(l)
             } else if l.chars().any(is_han) {
                 romanize_chinese(l)
             } else if l.chars().any(|c| ('\u{0400}'..='\u{04ff}').contains(&c)) {
@@ -1373,6 +1408,30 @@ fn romanize_song(lyrics: &[(i64, String)]) -> Vec<Option<String>> {
             (r != *l).then_some(r)
         })
         .collect()
+}
+
+/// kakasi picks kanji readings from a dictionary without context, and gets a few of the
+/// most common lyric words wrong (君 as "kun", 愛して as "itoshite", topic は as "ha").
+/// Rewrite those to kana first.
+/// ponytail: hand-picked fixes for frequent lyric words; a real morphological analyzer
+/// (lindera + IPADIC) would fix readings generally but adds a ~50 MB dictionary.
+fn romanize_japanese(s: &str) -> String {
+    const FIXES: [(&str, &str); 9] = [
+        ("君は", "きみわ"),
+        ("僕は", "ぼくわ"),
+        ("私は", "わたしわ"),
+        ("俺は", "おれわ"),
+        ("今日は", "きょうわ"),
+        ("君", "きみ"),
+        ("貴方", "あなた"),
+        ("愛して", "あいして"),
+        ("愛し", "あいし"),
+    ];
+    let mut text = s.to_string();
+    for (from, to) in FIXES {
+        text = text.replace(from, to);
+    }
+    kakasi::convert(text).romaji
 }
 
 fn is_hangul(c: char) -> bool {
@@ -1621,18 +1680,39 @@ fn load_art(url: &str) -> Option<Vec<u8>> {
     }
 }
 
+/// Synced lyrics for a track: disk cache first, then lrclib's exact match, then its search
+/// (which catches titles like "LOSER - KR Ver." that don't match exactly).
 fn fetch_lyrics(title: &str, artist: &str, duration_s: i64) -> Vec<(i64, String)> {
-    let mut req = ureq::get("https://lrclib.net/api/get")
-        .header("User-Agent", "nusa-linux (personal use)")
-        .query("track_name", title)
-        .query("artist_name", artist);
-    if duration_s > 0 {
-        req = req.query("duration", duration_s.to_string());
+    let key: String = format!("{artist} - {title}").chars().map(|c| if c == '/' { '_' } else { c }).collect();
+    let cache = glib::user_cache_dir().join("nusa/lyrics").join(format!("{key}.lrc"));
+    if let Ok(lrc) = std::fs::read_to_string(&cache) {
+        return parse_lrc(&lrc);
     }
-    let Ok(mut resp) = req.call() else { return vec![] };
-    let Ok(body) = resp.body_mut().read_to_string() else { return vec![] };
-    let json: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
-    json["syncedLyrics"].as_str().map(parse_lrc).unwrap_or_default()
+    let call = |path: &str, with_duration: bool| -> Option<serde_json::Value> {
+        let mut req = ureq::get(format!("https://lrclib.net/api/{path}"))
+            .header("User-Agent", "nusa-linux (personal use)")
+            .query("track_name", title)
+            .query("artist_name", artist);
+        if with_duration && duration_s > 0 {
+            req = req.query("duration", duration_s.to_string());
+        }
+        serde_json::from_str(&req.call().ok()?.body_mut().read_to_string().ok()?).ok()
+    };
+    let exact = call("get", true).and_then(|j| j["syncedLyrics"].as_str().map(str::to_owned));
+    let lrc = exact.or_else(|| {
+        // Closest duration among synced search results.
+        let results = call("search", false)?;
+        results
+            .as_array()?
+            .iter()
+            .filter(|r| r["syncedLyrics"].is_string())
+            .min_by_key(|r| (r["duration"].as_f64().unwrap_or(0.0) as i64 - duration_s).abs())
+            .and_then(|r| r["syncedLyrics"].as_str().map(str::to_owned))
+    });
+    let Some(lrc) = lrc else { return vec![] };
+    // Only successes are cached, so a song lrclib doesn't know yet is retried next time.
+    let _ = std::fs::create_dir_all(cache.parent().unwrap()).and_then(|_| std::fs::write(&cache, &lrc));
+    parse_lrc(&lrc)
 }
 
 /// "[mm:ss.xx] text" lines into (ms, text), sorted.
@@ -1676,8 +1756,13 @@ fn romanization() {
     assert_eq!(romanize_korean("감사합니다"), "gamsahapnida");
     assert_eq!(romanize_chinese("我爱你"), "wǒ ài nǐ");
     assert_eq!(romanize_cyrillic("Привет, мир"), "Privet, mir");
+    // A Japanese song: the kanji-only line is read as Japanese, not as Mandarin pinyin.
     let song = [(0, "君の名は".to_string()), (1, "名前".to_string())];
-    assert_eq!(romanize_song(&song), vec![None, None]); // Japanese: kanji not read as Mandarin
+    let rom = romanize_song(&song);
+    assert!(rom[0].as_deref().is_some_and(|r| r.starts_with("kimi")), "{rom:?}");
+    assert!(rom[1].as_deref().is_some_and(|r| r.contains("namae")), "{rom:?}");
+    assert!(romanize_japanese("愛してる").starts_with("aishi"));
+    assert!(romanize_japanese("僕は君を忘れない").contains("bokuwa"));
     assert_eq!(romanize_song(&[(0, "hello".to_string())]), vec![None]);
 }
 
