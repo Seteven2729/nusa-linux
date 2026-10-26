@@ -67,6 +67,29 @@ trait BtBattery {
     fn percentage(&self) -> zbus::Result<u8>;
 }
 
+#[proxy(interface = "org.kde.klipper.klipper", default_service = "org.kde.klipper", default_path = "/klipper")]
+// KDE's D-Bus APIs use camelCase names; zbus would default to PascalCase, so name them explicitly.
+trait Klipper {
+    #[zbus(name = "getClipboardHistoryMenu")]
+    fn get_clipboard_history_menu(&self) -> zbus::Result<Vec<String>>;
+    #[zbus(name = "setClipboardContents")]
+    fn set_clipboard_contents(&self, s: &str) -> zbus::Result<()>;
+    #[zbus(signal, name = "clipboardHistoryUpdated")]
+    fn clipboard_history_updated(&self) -> zbus::Result<()>;
+}
+
+#[proxy(interface = "org.kde.kdeconnect.device.notifications.notification", default_service = "org.kde.kdeconnect")]
+trait PhoneNotification {
+    #[zbus(property, name = "appName")]
+    fn app_name(&self) -> zbus::Result<String>;
+    #[zbus(property, name = "title")]
+    fn title(&self) -> zbus::Result<String>;
+    #[zbus(property, name = "text")]
+    fn text(&self) -> zbus::Result<String>;
+    #[zbus(property, name = "silent")]
+    fn silent(&self) -> zbus::Result<bool>;
+}
+
 const CSS: &str = "
 window { background: transparent; }
 .notch {
@@ -108,6 +131,11 @@ window { background: transparent; }
 .notch row:hover { background: rgba(255,255,255,0.08); }
 .lrc { font-size: 13px; padding: 3px 6px; opacity: 0.45; }
 .lrc.now { opacity: 1; font-weight: 700; }
+.rom { font-size: 11px; opacity: 0.6; }
+.mic { color: #ff9f0a; font-size: 10px; }
+.stats { font-size: 11px; color: #b9cdf5; font-feature-settings: 'tnum'; }
+.notch button.clip { min-height: 26px; padding: 0 10px; border-radius: 8px; background: rgba(255,255,255,0.06); font-size: 12px; }
+.notch button.clip:hover { background: rgba(255,255,255,0.14); }
 ";
 
 #[derive(Clone)]
@@ -129,6 +157,11 @@ struct Ui {
     lyrics_btn: gtk::ToggleButton,
     lyrics_list: gtk::ListBox,
     lyrics_scroll: gtk::ScrolledWindow,
+    lyric_rom: gtk::Label,
+    mic: gtk::Label,
+    stats: gtk::Label,
+    clips: gtk::Box,
+    accent: gtk::CssProvider,
 }
 
 /// What the idle mascot is doing; `None` means it is hidden and the clock shows.
@@ -160,6 +193,12 @@ struct State {
     mood: Mood,
     blink: bool,
     mascot_off: bool,
+    /// Romanized lyric lines, same order as `lyrics`; None where a line needs none.
+    lyrics_rom: Vec<Option<String>>,
+    /// Previous (busy, total) jiffies from /proc/stat, for the CPU percentage.
+    cpu_prev: Option<(u64, u64)>,
+    /// Apps recording from a microphone right now.
+    mic_apps: Vec<String>,
 }
 
 type Shared = Rc<RefCell<State>>;
@@ -231,7 +270,10 @@ fn build_ui(app: &gtk::Application) {
         }
         glib::ControlFlow::Continue
     });
+    // Orange dot while any app records from the microphone.
+    let mic = gtk::Label::builder().label("●").css_classes(["mic"]).visible(false).build();
     let top = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    top.append(&mic);
     top.append(&mini_art);
     top.append(&compact);
     top.append(&mascot);
@@ -241,6 +283,12 @@ fn build_ui(app: &gtk::Application) {
         .css_classes(["lyric"])
         .visible(false)
         .max_width_chars(40)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .build();
+    let lyric_rom = gtk::Label::builder()
+        .css_classes(["rom"])
+        .visible(false)
+        .max_width_chars(48)
         .ellipsize(gtk::pango::EllipsizeMode::End)
         .build();
     let title = gtk::Label::builder()
@@ -290,7 +338,12 @@ fn build_ui(app: &gtk::Application) {
     buttons.append(&next);
     let body = gtk::Box::new(gtk::Orientation::Vertical, 10);
     body.set_margin_top(10);
+    // Idle extras under the big clock: system stats and recent clipboard items.
+    let stats = gtk::Label::builder().css_classes(["stats"]).build();
+    let clips = gtk::Box::new(gtk::Orientation::Vertical, 4);
     body.append(&head);
+    body.append(&stats);
+    body.append(&clips);
     body.append(&seek_row);
     body.append(&buttons);
     // Full lyrics sit to the right of the player when the lyrics button is on.
@@ -318,6 +371,7 @@ fn build_ui(app: &gtk::Application) {
     notch.add_css_class("notch");
     notch.append(&top);
     notch.append(&lyric);
+    notch.append(&lyric_rom);
     notch.append(&expanded);
     window.set_child(Some(&notch));
 
@@ -339,7 +393,18 @@ fn build_ui(app: &gtk::Application) {
         lyrics_btn,
         lyrics_list,
         lyrics_scroll,
+        lyric_rom,
+        mic,
+        stats,
+        clips,
+        accent: gtk::CssProvider::new(),
     };
+    // Cover-tinted gradient lives in its own provider so it can be swapped per track.
+    gtk::style_context_add_provider_for_display(
+        &gtk::gdk::Display::default().unwrap(),
+        &ui.accent,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+    );
     let state: Shared = Rc::new(RefCell::new(State {
         minimal: minimal_flag().exists(),
         mascot_off: no_mascot_flag().exists(),
@@ -361,6 +426,50 @@ fn build_ui(app: &gtk::Application) {
         }
     });
     spawn_idle_watch(&ui, &state);
+    spawn_mic_watch(&ui, &state);
+
+    // Gestures on the notch: wheel/two-finger up-down = volume, left-right swipe = next/previous,
+    // middle click = play/pause. Inner scrollables (lyrics, seek bar) handle their own scroll first.
+    let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+    let acc = Rc::new(std::cell::Cell::new((0.0f64, 0.0f64)));
+    let (u, s, a) = (ui.clone(), state.clone(), acc.clone());
+    scroll.connect_scroll(move |_, dx, dy| {
+        let acc = &a;
+        let (mut ax, mut ay) = acc.get();
+        ax += dx;
+        ay += dy;
+        if ay.abs() >= 1.0 {
+            change_volume(&u, &s, if ay < 0.0 { "5%+" } else { "5%-" });
+            ay = 0.0;
+            ax = 0.0;
+        } else if ax.abs() >= 4.0 {
+            let p = s.borrow().player.clone();
+            if let Some(p) = p {
+                let next = ax > 0.0;
+                glib::spawn_future_local(async move {
+                    let _ = if next { p.next().await } else { p.previous().await };
+                });
+            }
+            ax = 0.0;
+            ay = 0.0;
+        }
+        acc.set((ax, ay));
+        glib::Propagation::Stop
+    });
+    // A finished touchpad gesture shouldn't leave half a step pending for the next one.
+    scroll.connect_scroll_end(move |_| acc.set((0.0, 0.0)));
+    notch.add_controller(scroll);
+    let middle = gtk::GestureClick::builder().button(2).build();
+    let s = state.clone();
+    middle.connect_pressed(move |_, _, _, _| {
+        let p = s.borrow().player.clone();
+        if let Some(p) = p {
+            glib::spawn_future_local(async move {
+                let _ = p.play_pause().await;
+            });
+        }
+    });
+    notch.add_controller(middle);
 
     // Hover opens, leaving closes.
     let hover = gtk::EventControllerMotion::new();
@@ -429,6 +538,10 @@ fn build_ui(app: &gtk::Application) {
     let (u, s) = (ui.clone(), state.clone());
     glib::timeout_add_seconds_local(1, move || {
         refresh_compact(&u, &s.borrow());
+        if u.stats.is_visible() && u.expanded.reveals_child() {
+            let text = read_stats(&mut s.borrow_mut().cpu_prev);
+            u.stats.set_label(&text);
+        }
         glib::ControlFlow::Continue
     });
 
@@ -446,6 +559,8 @@ fn build_ui(app: &gtk::Application) {
                     let line = current_line(&s.borrow().lyrics, us / 1000).unwrap_or_default();
                     u.lyric.set_label(&line);
                     let idx = current_index(&s.borrow().lyrics, us / 1000);
+                    let rom = idx.and_then(|i| s.borrow().lyrics_rom.get(i).cloned().flatten());
+                    u.lyric_rom.set_label(rom.as_deref().unwrap_or_default());
                     highlight_lyric(&u, &mut s.borrow_mut(), idx);
                     u.seek.set_value(us as f64 / 1e6);
                     u.time.set_label(&format!("{} / {}", mmss(us / 1_000_000), mmss(u.seek.adjustment().upper() as i64)));
@@ -479,6 +594,18 @@ fn build_ui(app: &gtk::Application) {
             eprintln!("bluetooth: {e}");
         }
     });
+    let (u, s) = (ui.clone(), state.clone());
+    glib::spawn_future_local(async move {
+        if let Err(e) = clipboard_loop(u, s).await {
+            eprintln!("clipboard: {e}");
+        }
+    });
+    let (u, s) = (ui.clone(), state.clone());
+    glib::spawn_future_local(async move {
+        if let Err(e) = phone_loop(u, s).await {
+            eprintln!("kdeconnect: {e}");
+        }
+    });
 
     window.present();
 }
@@ -501,8 +628,17 @@ fn refresh_compact(ui: &Ui, st: &State) {
     ui.lyrics_btn.set_visible(has_lyrics);
     ui.lyrics_scroll.set_visible(full_lyrics);
     ui.lyric.set_visible(st.playing && !st.lyrics.is_empty() && st.alert.is_none() && !full_lyrics);
+    ui.lyric_rom.set_visible(ui.lyric.is_visible() && st.lyrics_rom.iter().any(Option::is_some));
+    ui.stats.set_visible(!has_track);
+    ui.clips.set_visible(!has_track && ui.clips.first_child().is_some());
+    if has_track && ui.art.paintable().is_some() {
+        ui.notch.add_css_class("tinted");
+    } else {
+        ui.notch.remove_css_class("tinted");
+    }
     // When open, the expanded view shows either the track or a big clock, so the top row would only repeat it.
     let show_compact = st.alert.is_some() || (!open && !st.minimal);
+    ui.mic.set_visible(!st.mic_apps.is_empty() && show_compact);
     // The mascot stands in for the clock: closed, quiet and no music.
     let mascot = st.mood != Mood::None && show_compact && st.alert.is_none() && !st.playing;
     ui.mascot.set_visible(mascot);
@@ -538,6 +674,10 @@ fn refresh_compact(ui: &Ui, st: &State) {
 }
 
 fn show_alert(ui: &Ui, state: &Shared, text: String) {
+    show_alert_for(ui, state, text, 3);
+}
+
+fn show_alert_for(ui: &Ui, state: &Shared, text: String, secs: u32) {
     let seq = {
         let mut st = state.borrow_mut();
         st.alert = Some(text);
@@ -546,7 +686,7 @@ fn show_alert(ui: &Ui, state: &Shared, text: String) {
     };
     refresh_compact(ui, &state.borrow());
     let (u, s) = (ui.clone(), state.clone());
-    glib::timeout_add_seconds_local_once(3, move || {
+    glib::timeout_add_seconds_local_once(secs, move || {
         if s.borrow().alert_seq == seq {
             s.borrow_mut().alert = None;
             refresh_compact(&u, &s.borrow());
@@ -577,9 +717,7 @@ async fn mpris_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
         let current = state.borrow().player.as_ref().map(|p| p.inner().destination().to_string());
         let picked = pick_player(&conn, &dbus, current.as_deref()).await;
         if picked.is_none() {
-            let alert = state.borrow_mut().alert.take();
-            *state.borrow_mut() = State { alert, ..Default::default() };
-            refresh_compact(&ui, &state.borrow());
+            clear_player(&ui, &state);
         } else {
             state.borrow_mut().player = picked;
             refresh_player(&ui, &state).await;
@@ -612,6 +750,24 @@ async fn pick_player(conn: &Connection, dbus: &zbus::fdo::DBusProxy<'_>, current
     Some(alive.swap_remove(idx).2)
 }
 
+/// Forget the current player and its track, leaving everything else (alerts, mic, settings, mascot) alone.
+fn clear_player(ui: &Ui, state: &Shared) {
+    {
+        let mut st = state.borrow_mut();
+        st.player = None;
+        st.playing = false;
+        st.track.clear();
+        st.track_id = None;
+        st.art_url.clear();
+        st.seeking = None;
+        st.lyrics.clear();
+        st.lyrics_rom.clear();
+        st.lyric_idx = None;
+    }
+    ui.lyrics_list.remove_all();
+    refresh_compact(ui, &state.borrow());
+}
+
 async fn player(conn: &Connection, dest: String) -> zbus::Result<PlayerProxy<'static>> {
     PlayerProxy::builder(conn)
         .destination(dest)
@@ -624,8 +780,7 @@ async fn refresh_player(ui: &Ui, state: &Shared) {
     let Some(p) = state.borrow().player.clone() else { return };
     let (Ok(meta), Ok(status)) = (p.metadata().await, p.playback_status().await) else {
         // Player went away.
-        *state.borrow_mut() = State { alert: state.borrow_mut().alert.take(), ..Default::default() };
-        refresh_compact(ui, &state.borrow());
+        clear_player(ui, state);
         return;
     };
     let str_of = |k: &str| meta.get(k).and_then(|v| String::try_from(v.try_clone().ok()?).ok()).unwrap_or_default();
@@ -649,10 +804,18 @@ async fn refresh_player(ui: &Ui, state: &Shared) {
         glib::spawn_future_local(async move {
             let url = art_url.clone();
             let cover = gio::spawn_blocking(move || square_cover(&load_art(&url)?)).await.ok().flatten();
+            if let Some((_, _, _, (r, g, b))) = &cover {
+                ui.accent.load_from_string(&format!(
+                    ".notch.tinted {{ background: linear-gradient(160deg, #020510 0%, rgb({},{},{}) 65%, rgb({r},{g},{b}) 100%); }}",
+                    r / 3,
+                    g / 3,
+                    b / 3
+                ));
+            }
             if state.borrow().art_url != art_url {
                 return; // track changed while loading
             }
-            let tex = cover.map(|(pixels, alpha, stride)| {
+            let tex = cover.map(|(pixels, alpha, stride, _)| {
                 let format = if alpha { gtk::gdk::MemoryFormat::R8g8b8a8 } else { gtk::gdk::MemoryFormat::R8g8b8 };
                 gtk::gdk::MemoryTexture::new(112, 112, format, &pixels, stride).upcast::<gtk::gdk::Texture>()
             });
@@ -676,6 +839,7 @@ async fn refresh_player(ui: &Ui, state: &Shared) {
         if changed {
             st.track = title.clone();
             st.lyrics.clear();
+            st.lyrics_rom.clear();
             st.lyric_idx = None;
             ui.lyric.set_label("");
             ui.lyrics_list.remove_all();
@@ -690,9 +854,16 @@ async fn refresh_player(ui: &Ui, state: &Shared) {
             let t = title.clone();
             let lyrics = gio::spawn_blocking(move || fetch_lyrics(&t, &artist, length_s)).await.unwrap_or_default();
             if state.borrow().track == title {
-                for (_, line) in &lyrics {
+                let rom = romanize_song(&lyrics);
+                for ((_, line), r) in lyrics.iter().zip(&rom) {
+                    let text = if line.is_empty() { "♪".to_string() } else { glib::markup_escape_text(line).to_string() };
+                    let markup = match r {
+                        Some(r) => format!("{text}\n<span size='small' alpha='60%'>{}</span>", glib::markup_escape_text(r)),
+                        None => text,
+                    };
                     let label = gtk::Label::builder()
-                        .label(if line.is_empty() { "♪" } else { line })
+                        .label(markup)
+                        .use_markup(true)
                         .css_classes(["lrc"])
                         .xalign(0.0)
                         .wrap(true)
@@ -701,6 +872,7 @@ async fn refresh_player(ui: &Ui, state: &Shared) {
                     ui.lyrics_list.append(&label);
                 }
                 state.borrow_mut().lyrics = lyrics;
+                state.borrow_mut().lyrics_rom = rom;
                 refresh_compact(&ui, &state.borrow());
             }
         });
@@ -821,8 +993,8 @@ fn tanggal(d: &glib::DateTime) -> String {
 }
 
 /// Center-crop a cover to a square and shrink it to 112px, 2x the largest size we draw.
-/// Returns raw pixels (Pixbuf itself can't cross threads): (bytes, has_alpha, rowstride).
-fn square_cover(bytes: &[u8]) -> Option<(glib::Bytes, bool, usize)> {
+/// Returns raw pixels (Pixbuf itself can't cross threads): (bytes, has_alpha, rowstride, accent rgb).
+fn square_cover(bytes: &[u8]) -> Option<(glib::Bytes, bool, usize, (u8, u8, u8))> {
     let loader = gtk::gdk_pixbuf::PixbufLoader::new();
     loader.write(bytes).ok()?;
     loader.close().ok()?;
@@ -831,7 +1003,30 @@ fn square_cover(bytes: &[u8]) -> Option<(glib::Bytes, bool, usize)> {
     let sq = pb
         .new_subpixbuf((pb.width() - side) / 2, (pb.height() - side) / 2, side, side)
         .scale_simple(112, 112, gtk::gdk_pixbuf::InterpType::Bilinear)?;
-    Some((sq.read_pixel_bytes(), sq.has_alpha(), sq.rowstride() as usize))
+    let (pixels, alpha, stride) = (sq.read_pixel_bytes(), sq.has_alpha(), sq.rowstride() as usize);
+    let accent = accent_color(&pixels, if alpha { 4 } else { 3 }, stride, 112);
+    Some((pixels, alpha, stride, accent))
+}
+
+/// A dark, saturated version of the cover's main color, for the notch gradient.
+/// Colorful pixels count more than gray ones so a mostly-white cover still gives a hue.
+fn accent_color(px: &[u8], channels: usize, stride: usize, size: usize) -> (u8, u8, u8) {
+    let (mut r, mut g, mut b, mut w) = (0.0, 0.0, 0.0, 0.0);
+    for y in 0..size {
+        for x in 0..size {
+            let i = y * stride + x * channels;
+            let (pr, pg, pb) = (px[i] as f64, px[i + 1] as f64, px[i + 2] as f64);
+            let sat = pr.max(pg).max(pb) - pr.min(pg).min(pb) + 1.0;
+            r += pr * sat;
+            g += pg * sat;
+            b += pb * sat;
+            w += sat;
+        }
+    }
+    let (r, g, b) = (r / w, g / w, b / w);
+    // Scale so the brightest channel lands at ~110 (dark enough for white text), keeping the hue.
+    let k = 110.0 / r.max(g).max(b).max(1.0);
+    ((r * k) as u8, (g * k) as u8, (b * k) as u8)
 }
 
 fn draw_eyes(cr: &gtk::cairo::Context, w: f64, h: f64, mood: Mood, blink: bool) {
@@ -981,6 +1176,284 @@ fn set_mood(ui: &Ui, state: &Shared, mood: Mood) {
         }
         _ => {}
     }
+}
+
+fn change_volume(ui: &Ui, state: &Shared, step: &'static str) {
+    let (ui, state) = (ui.clone(), state.clone());
+    glib::spawn_future_local(async move {
+        let out = gio::spawn_blocking(move || {
+            let sink = "@DEFAULT_AUDIO_SINK@";
+            std::process::Command::new("wpctl").args(["set-volume", "-l", "1.0", sink, step]).status().ok()?;
+            let out = std::process::Command::new("wpctl").args(["get-volume", sink]).output().ok()?;
+            Some(String::from_utf8_lossy(&out.stdout).into_owned())
+        })
+        .await
+        .ok()
+        .flatten();
+        // "Volume: 0.45" or "Volume: 0.45 [MUTED]"
+        if let Some(v) = out.and_then(|o| o.split_whitespace().nth(1)?.parse::<f64>().ok()) {
+            show_alert_for(&ui, &state, format!("🔊  {}%", (v * 100.0).round()), 1);
+        }
+    });
+}
+
+/// "CPU 12% · RAM 6.1/15.4 GB · 52°C" from /proc and the CPU's hwmon sensor.
+fn read_stats(cpu_prev: &mut Option<(u64, u64)>) -> String {
+    let mut parts = vec![];
+    if let Some(line) = std::fs::read_to_string("/proc/stat").ok().and_then(|s| s.lines().next().map(str::to_owned)) {
+        let v: Vec<u64> = line.split_whitespace().skip(1).filter_map(|n| n.parse().ok()).collect();
+        let total: u64 = v.iter().sum();
+        let idle = v.get(3).copied().unwrap_or(0) + v.get(4).copied().unwrap_or(0);
+        let busy = total - idle;
+        if let Some((pb, pt)) = cpu_prev.replace((busy, total)) {
+            if total > pt {
+                parts.push(format!("CPU {}%", (busy - pb) * 100 / (total - pt)));
+            }
+        }
+    }
+    if let Ok(m) = std::fs::read_to_string("/proc/meminfo") {
+        let kb = |key: &str| -> f64 {
+            m.lines().find(|l| l.starts_with(key)).and_then(|l| l.split_whitespace().nth(1)?.parse().ok()).unwrap_or(0.0)
+        };
+        let (total, avail) = (kb("MemTotal:"), kb("MemAvailable:"));
+        parts.push(format!("RAM {:.1}/{:.1} GB", (total - avail) / 1048576.0, total / 1048576.0));
+    }
+    if let Some(t) = cpu_temp() {
+        parts.push(format!("{t}°C"));
+    }
+    parts.join("  ·  ")
+}
+
+fn cpu_temp() -> Option<i64> {
+    for dir in std::fs::read_dir("/sys/class/hwmon").ok()?.flatten() {
+        let name = std::fs::read_to_string(dir.path().join("name")).unwrap_or_default();
+        if ["k10temp", "coretemp", "zenpower", "cpu_thermal"].contains(&name.trim()) {
+            let milli: i64 = std::fs::read_to_string(dir.path().join("temp1_input")).ok()?.trim().parse().ok()?;
+            return Some(milli / 1000);
+        }
+    }
+    None
+}
+
+/// Last 3 clipboard items from Klipper; clicking one makes it the current clipboard again.
+async fn clipboard_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
+    let conn = Connection::session().await?;
+    let klipper = KlipperProxy::new(&conn).await?;
+    let mut updates = klipper.receive_clipboard_history_updated().await?;
+    loop {
+        while let Some(c) = ui.clips.first_child() {
+            ui.clips.remove(&c);
+        }
+        let history = klipper.get_clipboard_history_menu().await.inspect_err(|e| eprintln!("clipboard: {e}")).unwrap_or_default();
+        for item in history.into_iter().take(3) {
+            let flat: String = item.split_whitespace().collect::<Vec<_>>().join(" ");
+            if flat.is_empty() {
+                continue;
+            }
+            let short: String = if flat.chars().count() > 40 { flat.chars().take(40).collect::<String>() + "…" } else { flat };
+            let btn = gtk::Button::builder().label(format!("📋  {short}")).css_classes(["clip"]).build();
+            btn.child().and_then(|c| c.downcast::<gtk::Label>().ok()).inspect(|l| l.set_xalign(0.0));
+            let k = klipper.clone();
+            btn.connect_clicked(move |_| {
+                let (k, item) = (k.clone(), item.clone());
+                glib::spawn_future_local(async move {
+                    let _ = k.set_clipboard_contents(&item).await;
+                });
+            });
+            ui.clips.append(&btn);
+        }
+        refresh_compact(&ui, &state.borrow());
+        if updates.next().await.is_none() {
+            return Ok(());
+        }
+    }
+}
+
+/// Phone notifications forwarded by KDE Connect (calls show up as the dialer's notification).
+async fn phone_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
+    let conn = Connection::session().await?;
+    let rule = MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .interface("org.kde.kdeconnect.device.notifications")
+        .member("notificationPosted")
+        .build()?;
+    let mut stream = MessageStream::for_match_rule(rule, &conn, None).await?;
+    while let Some(Ok(msg)) = stream.next().await {
+        let Ok(id) = msg.body().deserialize::<String>() else { continue };
+        let Some(path) = msg.header().path().map(|p| format!("{p}/{id}")) else { continue };
+        let Ok(n) = PhoneNotificationProxy::builder(&conn).path(path).build().await else { continue };
+        if n.silent().await.unwrap_or(false) {
+            continue;
+        }
+        let (app, title, text) = (n.app_name().await.unwrap_or_default(), n.title().await.unwrap_or_default(), n.text().await.unwrap_or_default());
+        let body = [title, text].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(": ");
+        show_alert_for(&ui, &state, format!("📱  {app} · {body}"), 5);
+    }
+    Ok(())
+}
+
+/// Watches PipeWire through `pactl subscribe` and reports which apps record from a mic.
+/// ponytail: shells out to pactl instead of linking libpulse/pipewire; swap if pactl ever goes missing.
+fn spawn_mic_watch(ui: &Ui, state: &Shared) {
+    let (tx, rx) = async_channel::unbounded::<Vec<String>>();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let recording = || -> Vec<String> {
+            let Ok(out) = std::process::Command::new("pactl").args(["-f", "json", "list", "source-outputs"]).output() else { return vec![] };
+            let list: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+            let mut apps: Vec<String> = list
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|o| !o["corked"].as_bool().unwrap_or(false))
+                // Level meters (volume applets) open monitor streams; they are not a mic in use.
+                .filter(|o| o["properties"]["stream.monitor"].as_str() != Some("true"))
+                .filter(|o| !o["properties"]["media.name"].as_str().unwrap_or("").contains("Peak"))
+                .filter_map(|o| o["properties"]["application.name"].as_str().map(str::to_owned))
+                .collect();
+            apps.dedup();
+            apps
+        };
+        let mut last = recording();
+        let _ = tx.send_blocking(last.clone());
+        let mut cmd = std::process::Command::new("pactl");
+        cmd.arg("subscribe").stdout(std::process::Stdio::piped());
+        // Have the kernel stop pactl when this thread (and so Nusa) dies, instead of leaving it orphaned.
+        // SAFETY: prctl is async-signal-safe, which is all pre_exec requires.
+        unsafe {
+            std::os::unix::process::CommandExt::pre_exec(&mut cmd, || {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                Ok(())
+            });
+        }
+        let Ok(mut child) = cmd.spawn() else { return };
+        for line in std::io::BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok) {
+            if line.contains("source-output") {
+                let now = recording();
+                if now != last {
+                    last = now;
+                    let _ = tx.send_blocking(last.clone());
+                }
+            }
+        }
+    });
+    let (ui, state) = (ui.clone(), state.clone());
+    glib::spawn_future_local(async move {
+        while let Ok(apps) = rx.recv().await {
+            let started = state.borrow().mic_apps.is_empty() && !apps.is_empty();
+            let name = apps.join(", ");
+            state.borrow_mut().mic_apps = apps;
+            if started {
+                show_alert(&ui, &state, format!("🎙  Mic dipakai · {name}"));
+            } else {
+                refresh_compact(&ui, &state.borrow());
+            }
+        }
+    });
+}
+
+/// Romanize every line with one script decision for the whole song, so a Japanese song's
+/// kanji-only lines aren't read as Mandarin. Japanese itself is left as-is for now.
+fn romanize_song(lyrics: &[(i64, String)]) -> Vec<Option<String>> {
+    let has_kana = lyrics.iter().any(|(_, l)| l.chars().any(|c| ('\u{3040}'..='\u{30ff}').contains(&c)));
+    lyrics
+        .iter()
+        .map(|(_, l)| {
+            let r = if l.chars().any(is_hangul) {
+                romanize_korean(l)
+            } else if has_kana {
+                return None;
+            } else if l.chars().any(is_han) {
+                romanize_chinese(l)
+            } else if l.chars().any(|c| ('\u{0400}'..='\u{04ff}').contains(&c)) {
+                romanize_cyrillic(l)
+            } else {
+                return None;
+            };
+            (r != *l).then_some(r)
+        })
+        .collect()
+}
+
+fn is_hangul(c: char) -> bool {
+    ('\u{ac00}'..='\u{d7a3}').contains(&c)
+}
+
+fn is_han(c: char) -> bool {
+    ('\u{4e00}'..='\u{9fff}').contains(&c) || ('\u{3400}'..='\u{4dbf}').contains(&c)
+}
+
+/// Revised Romanization, plus the two sound rules that matter most when singing along:
+/// a final consonant carries over to a following silent ㅇ (있어 = isseo), and ㄹ before a vowel is r.
+fn romanize_korean(s: &str) -> String {
+    const INITIAL: [&str; 19] = ["g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "", "j", "jj", "ch", "k", "t", "p", "h"];
+    const VOWEL: [&str; 21] = [
+        "a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o", "wa", "wae", "oe", "yo", "u", "wo", "we", "wi", "yu", "eu", "ui", "i",
+    ];
+    // Final consonant at the end of a syllable / when it moves onto a following vowel.
+    const FINAL: [&str; 28] = ["", "k", "k", "k", "n", "n", "n", "t", "l", "k", "m", "p", "l", "l", "p", "l", "m", "p", "p", "t", "t", "ng", "t", "t", "k", "t", "p", "t"];
+    const LINKED: [&str; 28] = [
+        "", "g", "kk", "ks", "n", "nj", "n", "d", "r", "lg", "lm", "lb", "ls", "lt", "lp", "r", "m", "b", "ps", "s", "ss", "ng", "j", "ch", "k", "t", "p", "",
+    ];
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    let mut carried = false; // this syllable's silent ㅇ already got the previous final
+    for (i, &c) in chars.iter().enumerate() {
+        if !is_hangul(c) {
+            out.push(c);
+            carried = false;
+            continue;
+        }
+        let code = c as u32 - 0xac00;
+        let (l, v, t) = ((code / 588) as usize, ((code % 588) / 28) as usize, (code % 28) as usize);
+        if !(carried && l == 11) {
+            out.push_str(INITIAL[l]);
+        }
+        out.push_str(VOWEL[v]);
+        let next_silent = chars.get(i + 1).filter(|n| is_hangul(**n)).is_some_and(|n| (*n as u32 - 0xac00) / 588 == 11);
+        carried = next_silent && t != 0;
+        out.push_str(if carried { LINKED[t] } else { FINAL[t] });
+    }
+    out
+}
+
+fn romanize_chinese(s: &str) -> String {
+    use pinyin::ToPinyin;
+    let mut out = String::new();
+    for (c, p) in s.chars().zip(s.to_pinyin()) {
+        match p {
+            Some(p) => {
+                if !out.is_empty() && !out.ends_with(' ') {
+                    out.push(' ');
+                }
+                out.push_str(p.with_tone());
+            }
+            None => out.push(c),
+        }
+    }
+    out
+}
+
+fn romanize_cyrillic(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            let lower = c.to_lowercase().next().unwrap_or(c);
+            let r = match lower {
+                'а' => "a", 'б' => "b", 'в' => "v", 'г' => "g", 'д' => "d", 'е' => "e", 'ё' => "yo", 'ж' => "zh",
+                'з' => "z", 'и' => "i", 'й' => "y", 'к' => "k", 'л' => "l", 'м' => "m", 'н' => "n", 'о' => "o",
+                'п' => "p", 'р' => "r", 'с' => "s", 'т' => "t", 'у' => "u", 'ф' => "f", 'х' => "kh", 'ц' => "ts",
+                'ч' => "ch", 'ш' => "sh", 'щ' => "shch", 'ъ' | 'ь' => "", 'ы' => "y", 'э' => "e", 'ю' => "yu", 'я' => "ya",
+                'і' => "i", 'ї' => "yi", 'є' => "ye", 'ґ' => "g",
+                _ => return c.to_string(),
+            };
+            if c != lower {
+                let mut cs = r.chars();
+                cs.next().map(|f| f.to_uppercase().chain(cs).collect()).unwrap_or_default()
+            } else {
+                r.to_string()
+            }
+        })
+        .collect()
 }
 
 fn seek_to(state: &Shared, secs: f64) {
@@ -1193,6 +1666,26 @@ fn lrc() {
     assert_eq!(current_line(&l, 12500).as_deref(), Some("second"));
     assert_eq!(current_line(&l, 30000).as_deref(), Some("second"));
     assert_eq!(current_index(&l, 60000), Some(2));
+}
+
+#[test]
+fn romanization() {
+    assert_eq!(romanize_korean("사랑해"), "saranghae");
+    assert_eq!(romanize_korean("있어"), "isseo");
+    assert_eq!(romanize_korean("우리 사랑하지 말아요"), "uri saranghaji marayo");
+    assert_eq!(romanize_korean("감사합니다"), "gamsahapnida");
+    assert_eq!(romanize_chinese("我爱你"), "wǒ ài nǐ");
+    assert_eq!(romanize_cyrillic("Привет, мир"), "Privet, mir");
+    let song = [(0, "君の名は".to_string()), (1, "名前".to_string())];
+    assert_eq!(romanize_song(&song), vec![None, None]); // Japanese: kanji not read as Mandarin
+    assert_eq!(romanize_song(&[(0, "hello".to_string())]), vec![None]);
+}
+
+#[test]
+fn accent_is_dark_and_keeps_hue() {
+    let red = [200u8, 20, 20].repeat(4);
+    let (r, g, b) = accent_color(&red, 3, 6, 2);
+    assert!(r == 110 && g < 20 && b < 20, "{r} {g} {b}");
 }
 
 #[test]

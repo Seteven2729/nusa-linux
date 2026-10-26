@@ -7,11 +7,25 @@ Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya.
 ## Fitur
 
 - Lagu yang sedang diputar dari player MPRIS mana pun (Spotify, Strawberry, browser, mpv): cover, judul, artis, prev/play/next, seek bar
+- Warna gradien notch mengikuti warna cover lagu
 - Lirik tersinkron dari [lrclib.net](https://lrclib.net), satu baris di bawah judul, atau panel lirik penuh (klik baris untuk lompat)
+- Romanisasi lirik untuk Korea, Mandarin (pinyin), dan Cyrillic. Lirik Jepang dibiarkan apa adanya.
 - Popup charger dicolok/dicabut, Wi-Fi tersambung/putus, headphone Bluetooth tersambung beserta baterainya
+- Titik oranye saat ada aplikasi yang memakai mikrofon
+- Notifikasi HP lewat KDE Connect, termasuk telepon masuk
 - Maskot mata saat idle: muncul setelah 30 detik, tertidur setelah 3 menit, tersenyum saat kamu kembali
-- Jam besar dan tanggal (bahasa Indonesia) saat tidak ada lagu
+- Saat tidak ada lagu: jam besar, tanggal (bahasa Indonesia), CPU/RAM/suhu, dan 3 isi clipboard terakhir (klik untuk copy ulang)
 - Menu tray: start with login, minimal notch (garis tipis), maskot, exit
+
+## Gesture
+
+Berlaku langsung di notch, tanpa perlu membukanya.
+
+| Gesture | Aksi |
+|---|---|
+| Scroll atas/bawah (mouse atau dua jari) | Volume ±5% |
+| Geser dua jari kiri/kanan | Lagu sebelumnya/berikutnya |
+| Klik tengah | Play/pause |
 
 ## Kebutuhan
 
@@ -30,6 +44,9 @@ Layanan berikut opsional. Kalau tidak ada, fiturnya diam dan sisanya tetap jalan
 - NetworkManager untuk popup Wi-Fi
 - BlueZ untuk popup headphone
 - `ext-idle-notify` di compositor untuk maskot
+- `wpctl` (WirePlumber) untuk gesture volume, `pactl` untuk indikator mikrofon
+- Klipper (bawaan KDE) untuk daftar clipboard
+- KDE Connect dengan HP yang sudah di-pair untuk notifikasi HP
 
 Font yang dipakai Inter, dengan cadangan Noto Sans.
 
@@ -102,10 +119,13 @@ rm -r ~/.config/nusa
 
 Satu-satunya data yang keluar dari komputer adalah judul, artis, dan durasi lagu yang dikirim ke lrclib.net untuk mencari lirik. Cover dari browser diunduh langsung dari URL yang diberikan player.
 
+Isi clipboard dan notifikasi HP tampil di notch. Perhatikan ini saat berbagi layar: clipboard terlihat begitu notch di-hover tanpa lagu, dan notifikasi HP muncul 5 detik tanpa perlu hover.
+
 ## Troubleshooting
 
 - **Notch tidak muncul.** Jalankan `nusa-linux` dari terminal tanpa `&` dan lihat errornya. Pastikan sesi Wayland: `echo $XDG_SESSION_TYPE` harus `wayland`.
 - **Lagu tidak terdeteksi.** Cek apakah player terdaftar di MPRIS: `busctl --user list | grep mpris`.
+- **Titik mikrofon tidak muncul.** Cek apakah ada stream yang aktif: `pactl list source-outputs short`. Titik hanya tampil saat notch tertutup.
 - **Muncul dua notch.** Tidak seharusnya terjadi, Nusa hanya mengizinkan satu instance. Jalankan `pkill -x nusa-linux` lalu buka lagi.
 
 ## Test
