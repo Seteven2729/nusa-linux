@@ -90,6 +90,14 @@ trait PhoneNotification {
     fn silent(&self) -> zbus::Result<bool>;
 }
 
+#[proxy(interface = "org.kde.PlasmaShell", default_service = "org.kde.plasmashell", default_path = "/PlasmaShell")]
+trait PlasmaShell {
+    #[zbus(name = "wallpaper")]
+    fn wallpaper(&self, screen: u32) -> zbus::Result<HashMap<String, OwnedVariant>>;
+    #[zbus(signal, name = "wallpaperChanged")]
+    fn wallpaper_changed(&self, screen: u32) -> zbus::Result<()>;
+}
+
 const CSS: &str = "
 window { background: transparent; }
 .notch {
@@ -112,6 +120,9 @@ window { background: transparent; }
 
 .eq { min-height: 14px; }
 .eq > box { background: #8fd8ff; border-radius: 2px; min-width: 3px; min-height: 3px; }
+progressbar.dl { margin-top: 3px; }
+progressbar.dl trough { min-height: 3px; min-width: 0; border-radius: 2px; background: rgba(255,255,255,0.22); border: none; }
+progressbar.dl progress { min-height: 3px; border-radius: 2px; background: #8fd8ff; border: none; }
 
 .notch scale { padding: 0; min-width: 210px; }
 .notch scale trough { min-height: 4px; border-radius: 2px; background: rgba(255,255,255,0.22); border: none; }
@@ -163,6 +174,8 @@ struct Ui {
     clips: gtk::Box,
     clip_btn: gtk::ToggleButton,
     accent: gtk::CssProvider,
+    wall: gtk::CssProvider,
+    dl_bar: gtk::ProgressBar,
 }
 
 /// What the idle mascot is doing; `None` means it is hidden and the clock shows.
@@ -193,6 +206,8 @@ struct State {
     lyric_idx: Option<usize>,
     mood: Mood,
     blink: bool,
+    /// Mascot head bob while music plays: flips between up and down on the beat timer.
+    bob: bool,
     mascot_off: bool,
     /// Romanized lyric lines, same order as `lyrics`; None where a line needs none.
     lyrics_rom: Vec<Option<String>>,
@@ -200,6 +215,8 @@ struct State {
     cpu_prev: Option<(u64, u64)>,
     /// Apps recording from a microphone right now.
     mic_apps: Vec<String>,
+    /// Download being shown: (app name, progress 0..1).
+    download: Option<(String, f64)>,
 }
 
 type Shared = Rc<RefCell<State>>;
@@ -385,6 +402,9 @@ fn build_ui(app: &gtk::Application) {
     let notch = gtk::Box::new(gtk::Orientation::Vertical, 2);
     notch.add_css_class("notch");
     notch.append(&top);
+    // Thin download bar under the top row; stays even with music or in minimal mode.
+    let dl_bar = gtk::ProgressBar::builder().css_classes(["dl"]).visible(false).build();
+    notch.append(&dl_bar);
     notch.append(&lyric);
     notch.append(&lyric_rom);
     notch.append(&expanded);
@@ -414,11 +434,18 @@ fn build_ui(app: &gtk::Application) {
         clips,
         clip_btn,
         accent: gtk::CssProvider::new(),
+        wall: gtk::CssProvider::new(),
+        dl_bar,
     };
     // Cover-tinted gradient lives in its own provider so it can be swapped per track.
     gtk::style_context_add_provider_for_display(
         &gtk::gdk::Display::default().unwrap(),
         &ui.accent,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+    );
+    gtk::style_context_add_provider_for_display(
+        &gtk::gdk::Display::default().unwrap(),
+        &ui.wall,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
     );
     let state: Shared = Rc::new(RefCell::new(State {
@@ -430,7 +457,14 @@ fn build_ui(app: &gtk::Application) {
     let s = state.clone();
     ui.mascot.set_draw_func(move |_, cr, w, h| {
         let st = s.borrow();
-        draw_eyes(cr, w as f64, h as f64, st.mood, st.blink);
+        let music = if st.playing {
+            Music::Playing(st.bob)
+        } else if st.player.is_some() && !st.track.is_empty() {
+            Music::Paused
+        } else {
+            Music::None
+        };
+        draw_eyes(cr, w as f64, h as f64, st.mood, st.blink, music);
     });
     let (u, s) = (ui.clone(), state.clone());
     ui.lyrics_btn.connect_toggled(move |_| refresh_compact(&u, &s.borrow()));
@@ -444,6 +478,22 @@ fn build_ui(app: &gtk::Application) {
         }
     });
     spawn_idle_watch(&ui, &state);
+    // While the mascot is out and music plays, bob its head at the same 4 Hz as the equalizer.
+    let (u, s) = (ui.clone(), state.clone());
+    glib::timeout_add_local(Duration::from_millis(250), move || {
+        if u.mascot.is_visible() && s.borrow().playing {
+            let bob = !s.borrow().bob;
+            s.borrow_mut().bob = bob;
+            u.mascot.queue_draw();
+        }
+        glib::ControlFlow::Continue
+    });
+    let u = ui.clone();
+    glib::spawn_future_local(async move {
+        if let Err(e) = wallpaper_loop(u).await {
+            eprintln!("wallpaper: {e}");
+        }
+    });
     spawn_mic_watch(&ui, &state);
 
     // Gestures on the notch: wheel/two-finger up-down = volume, left-right swipe = next/previous,
@@ -625,6 +675,12 @@ fn build_ui(app: &gtk::Application) {
             eprintln!("kdeconnect: {e}");
         }
     });
+    let (u, s) = (ui.clone(), state.clone());
+    glib::spawn_future_local(async move {
+        if let Err(e) = download_loop(u, s).await {
+            eprintln!("downloads: {e}");
+        }
+    });
 
     window.present();
 }
@@ -634,6 +690,8 @@ fn refresh_compact(ui: &Ui, st: &State) {
         a.clone()
     } else if st.playing {
         format!("♪  {}", st.track)
+    } else if let Some((_, p)) = &st.download {
+        format!("⬇  {}%", (p * 100.0).round())
     } else {
         glib::DateTime::now_local().and_then(|d| d.format("%H:%M")).map(|s| s.to_string()).unwrap_or_default()
     };
@@ -654,19 +712,25 @@ fn refresh_compact(ui: &Ui, st: &State) {
     ui.clips.set_visible(open && !has_track && has_clips && ui.clip_btn.is_active());
     if has_track && ui.art.paintable().is_some() {
         ui.notch.add_css_class("tinted");
+        ui.notch.remove_css_class("wall");
     } else {
         ui.notch.remove_css_class("tinted");
+        ui.notch.add_css_class("wall");
     }
     // When open, the expanded view shows either the track or a big clock, so the top row would only repeat it.
     let show_compact = st.alert.is_some() || (!open && !st.minimal);
     ui.mic.set_visible(!st.mic_apps.is_empty() && show_compact);
-    // The mascot stands in for the clock: closed, quiet and no music.
-    let mascot = st.mood != Mood::None && show_compact && st.alert.is_none() && !st.playing;
+    // The mascot stands in for the clock (or the song title) once you have been away a while.
+    let mascot = st.mood != Mood::None && show_compact && st.alert.is_none() && st.download.is_none();
+    ui.dl_bar.set_visible(!open && st.download.is_some());
+    if let Some((_, p)) = &st.download {
+        ui.dl_bar.set_fraction(*p);
+    }
     ui.mascot.set_visible(mascot);
     ui.compact.set_visible(show_compact && !mascot);
     let media = show_compact && st.playing && st.alert.is_none();
     ui.eq.set_visible(media);
-    ui.mini_art.set_visible(media && ui.mini_art.paintable().is_some());
+    ui.mini_art.set_visible(media && !mascot && ui.mini_art.paintable().is_some());
     if ui.expanded.reveals_child() {
         ui.notch.add_css_class("open");
     } else {
@@ -692,6 +756,69 @@ fn refresh_compact(ui: &Ui, st: &State) {
         ui.art.set_visible(false);
         ui.seek.parent().unwrap().set_visible(false);
     }
+}
+
+/// Download progress that apps (browsers, file managers) publish through the Unity
+/// LauncherEntry API, the same signal Plasma's task manager reads for its progress bars.
+async fn download_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
+    let conn = Connection::session().await?;
+    let rule = MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .interface("com.canonical.Unity.LauncherEntry")
+        .member("Update")
+        .build()?;
+    let mut stream = MessageStream::for_match_rule(rule, &conn, None).await?;
+    let dbus = zbus::fdo::DBusProxy::new(&conn).await?;
+    // Updates only carry the keys that changed, so keep the last known (progress, visible) per app.
+    let mut entries: HashMap<String, (f64, bool)> = HashMap::new();
+    // Music players (Strawberry) report song position through the same API; that's not a download.
+    let mut is_player: HashMap<String, bool> = HashMap::new();
+    while let Some(Ok(msg)) = stream.next().await {
+        let Some(sender) = msg.header().sender().map(|s| s.to_string()) else { continue };
+        if !is_player.contains_key(&sender) {
+            let mut player = false;
+            for name in dbus.list_names().await.unwrap_or_default() {
+                if name.starts_with("org.mpris.MediaPlayer2.")
+                    && dbus.get_name_owner(name.as_ref()).await.is_ok_and(|o| o.as_str() == sender)
+                {
+                    player = true;
+                }
+            }
+            is_player.insert(sender.clone(), player);
+        }
+        if is_player[&sender] {
+            continue;
+        }
+        let Ok((uri, props)) = msg.body().deserialize::<(String, HashMap<String, OwnedVariant>)>() else { continue };
+        let e = entries.entry(uri.clone()).or_insert((0.0, false));
+        let was_visible = e.1;
+        if let Some(p) = props.get("progress").and_then(|v| f64::try_from(v.try_clone().ok()?).ok()) {
+            e.0 = p.clamp(0.0, 1.0);
+        }
+        if let Some(v) = props.get("progress-visible").and_then(|v| bool::try_from(v.try_clone().ok()?).ok()) {
+            e.1 = v;
+        }
+        let (progress, visible) = *e;
+        let app = app_name(&uri);
+        if visible {
+            // Most recently updated download wins when several run at once.
+            state.borrow_mut().download = Some((app, progress));
+            refresh_compact(&ui, &state.borrow());
+        } else if was_visible {
+            let showing = state.borrow().download.as_ref().is_some_and(|(a, _)| *a == app);
+            if showing {
+                state.borrow_mut().download = None;
+            }
+            show_alert(&ui, &state, format!("⬇  Download selesai · {app}"));
+        }
+    }
+    Ok(())
+}
+
+/// "application://org.mozilla.firefox.desktop" -> "firefox", "application://google-chrome.desktop" -> "google-chrome".
+fn app_name(uri: &str) -> String {
+    let id = uri.trim_start_matches("application://").trim_end_matches(".desktop");
+    id.rsplit('.').next().unwrap_or(id).to_string()
 }
 
 fn show_alert(ui: &Ui, state: &Shared, text: String) {
@@ -1057,9 +1184,25 @@ fn accent_color(px: &[u8], channels: usize, stride: usize, size: usize) -> (u8, 
     ((r * k) as u8, (g * k) as u8, (b * k) as u8)
 }
 
-fn draw_eyes(cr: &gtk::cairo::Context, w: f64, h: f64, mood: Mood, blink: bool) {
+/// What the music is doing, for the mascot's expression.
+#[derive(Clone, Copy)]
+enum Music {
+    None,
+    Playing(bool),
+    Paused,
+}
+
+fn draw_eyes(cr: &gtk::cairo::Context, w: f64, h: f64, mood: Mood, blink: bool, music: Music) {
     use std::f64::consts::PI;
-    let (ew, eh, gap, cy) = (9.0, 13.0, 8.0, h / 2.0);
+    let (ew, eh, gap) = (9.0, 13.0, 8.0);
+    // Music overrides the idle expression (except the hello wave): happy eyes bobbing to the
+    // beat while playing, drowsy flat eyes while paused.
+    let mood = match (mood, music) {
+        (Mood::Wave, _) | (_, Music::None) => mood,
+        (_, Music::Playing(_)) => Mood::Wave,
+        (_, Music::Paused) => Mood::Sleep,
+    };
+    let cy = h / 2.0 + if let Music::Playing(up) = music { if up { -2.5 } else { 2.5 } } else { 0.0 };
     cr.set_source_rgb(1.0, 1.0, 1.0);
     cr.set_line_width(2.0);
     cr.set_line_cap(gtk::cairo::LineCap::Round);
@@ -1073,6 +1216,12 @@ fn draw_eyes(cr: &gtk::cairo::Context, w: f64, h: f64, mood: Mood, blink: bool) 
                 cr.arc(x + r, cy + eh / 2.0 - r, r, 0.0, PI);
                 cr.close_path();
                 let _ = cr.fill();
+            }
+            Mood::Sleep if matches!(music, Music::Paused) => {
+                // Drowsy: flat, half-shut lids.
+                cr.move_to(x, cy + 1.0);
+                cr.line_to(x + ew, cy + 1.0);
+                let _ = cr.stroke();
             }
             Mood::Awake | Mood::Sleep => {
                 // Closed: a soft downward curve.
@@ -1090,7 +1239,7 @@ fn draw_eyes(cr: &gtk::cairo::Context, w: f64, h: f64, mood: Mood, blink: bool) 
             Mood::None => {}
         }
     }
-    if mood == Mood::Sleep {
+    if mood == Mood::Sleep && !matches!(music, Music::Paused) {
         cr.set_font_size(9.0);
         cr.move_to(w / 2.0 + gap / 2.0 + ew + 3.0, cy - 2.0);
         let _ = cr.show_text("z");
@@ -1515,6 +1664,54 @@ fn romanize_cyrillic(s: &str) -> String {
         .collect()
 }
 
+/// When idle, tint the notch with the wallpaper's main color (same recipe as album covers),
+/// and follow Plasma's wallpaperChanged signal instead of polling.
+async fn wallpaper_loop(ui: Ui) -> zbus::Result<()> {
+    let conn = Connection::session().await?;
+    let shell = PlasmaShellProxy::new(&conn).await?;
+    let mut changes = shell.receive_wallpaper_changed().await?;
+    loop {
+        let url = shell
+            .wallpaper(0)
+            .await
+            .ok()
+            .and_then(|w| String::try_from(w.get("Image")?.try_clone().ok()?).ok())
+            .unwrap_or_default();
+        let accent = gio::spawn_blocking(move || {
+            let path = gio::File::for_uri(&url).path()?;
+            square_cover(&std::fs::read(wallpaper_image(&path)?).ok()?).map(|c| c.3)
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some((r, g, b)) = accent {
+            ui.wall.load_from_string(&format!(
+                ".notch.wall {{ background: linear-gradient(160deg, #020510 0%, rgb({},{},{}) 65%, rgb({r},{g},{b}) 100%); }}",
+                r / 3,
+                g / 3,
+                b / 3
+            ));
+        }
+        if changes.next().await.is_none() {
+            return Ok(());
+        }
+    }
+}
+
+/// A wallpaper is either an image file or a KDE wallpaper package (a folder with
+/// contents/images/<size>.<ext>); for a package take the largest image file.
+fn wallpaper_image(path: &std::path::Path) -> Option<PathBuf> {
+    if path.is_file() {
+        return Some(path.to_path_buf());
+    }
+    std::fs::read_dir(path.join("contents/images"))
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
+        .max_by_key(|p| p.metadata().map(|m| m.len()).unwrap_or(0))
+}
+
 fn seek_to(state: &Shared, secs: f64) {
     let st = state.borrow();
     if let (Some(p), Some(id)) = (st.player.clone(), st.track_id.clone()) {
@@ -1771,6 +1968,13 @@ fn accent_is_dark_and_keeps_hue() {
     let red = [200u8, 20, 20].repeat(4);
     let (r, g, b) = accent_color(&red, 3, 6, 2);
     assert!(r == 110 && g < 20 && b < 20, "{r} {g} {b}");
+}
+
+#[test]
+fn launcher_app_name() {
+    assert_eq!(app_name("application://firefox.desktop"), "firefox");
+    assert_eq!(app_name("application://org.mozilla.firefox.desktop"), "firefox");
+    assert_eq!(app_name("application://google-chrome.desktop"), "google-chrome");
 }
 
 #[test]

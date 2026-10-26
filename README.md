@@ -7,13 +7,14 @@ Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya.
 ## Fitur
 
 - Lagu yang sedang diputar dari player MPRIS mana pun (Spotify, Strawberry, browser, mpv): cover, judul, artis, prev/play/next, seek bar
-- Warna gradien notch mengikuti warna cover lagu
+- Warna gradien notch mengikuti warna cover lagu, dan saat idle mengikuti warna wallpaper Plasma
 - Lirik tersinkron dari [lrclib.net](https://lrclib.net), satu baris di bawah judul, atau panel lirik penuh (klik baris untuk lompat)
 - Romanisasi lirik untuk Korea, Jepang (termasuk kanji), Mandarin (pinyin), dan Cyrillic
 - Popup charger dicolok/dicabut, Wi-Fi tersambung/putus, headphone Bluetooth tersambung beserta baterainya
 - Titik oranye saat ada aplikasi yang memakai mikrofon
+- Progres download (browser dan aplikasi lain yang memakai Unity LauncherEntry): bar tipis di notch, lalu popup saat selesai
 - Notifikasi HP lewat KDE Connect, termasuk telepon masuk
-- Maskot mata saat idle: muncul setelah 30 detik, tertidur setelah 3 menit, tersenyum saat kamu kembali
+- Maskot mata saat idle: muncul setelah 30 detik, tertidur setelah 3 menit, tersenyum saat kamu kembali. Kalau musik sedang jalan, maskot tersenyum dan mengangguk-angguk. Kalau di-pause, matanya mengantuk.
 - Saat tidak ada lagu: jam besar, tanggal (bahasa Indonesia), dan CPU/RAM/suhu
 - Tombol clipboard di tampilan idle: membuka 3 isi clipboard terakhir (klik untuk copy ulang). Panel tertutup lagi setiap notch ditutup.
 - Menu tray: start with login, minimal notch (garis tipis), maskot, exit
