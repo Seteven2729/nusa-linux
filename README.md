@@ -4,7 +4,7 @@
 
 Notch kecil di tengah atas layar untuk desktop Linux berbasis Wayland. Terinspirasi dari [Nusa for Windows](https://rama2555.github.io/nusa/), ditulis ulang dari nol dengan Rust dan GTK4. Untuk pemakaian pribadi.
 
-Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya. Notch yang terbuka punya empat halaman, pindah dengan panah ‹ ›: Home (jam, tanggal, statistik, clipboard), Media (player), Mixer (volume per aplikasi), dan Download. Saat dibuka, notch langsung ke Media kalau ada lagu, ke Download kalau ada yang sedang diunduh, dan ke Home kalau tidak keduanya.
+Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya. Notch yang terbuka punya lima halaman, pindah dengan panah ‹ ›: Home (jam, tanggal, statistik, clipboard), Media (player), Mixer (volume per aplikasi), Download, dan Screenshots. Saat dibuka, notch langsung ke Media kalau ada lagu, ke Download kalau ada yang sedang diunduh, dan ke Home kalau tidak keduanya.
 
 <p align="center">
   <img src="docs/screenshots/open-music.png" width="391" alt="Notch terbuka saat musik diputar: cover, judul, seek bar, tombol kontrol, dan baris lirik">
@@ -31,6 +31,13 @@ Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya. Notch yang 
   <tr>
     <td align="center" colspan="2"><img src="docs/screenshots/downloads-page.png" width="420" alt="Halaman Download"><br>Halaman Download: semua download yang berjalan dan file terbaru</td>
   </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/mixer.png" width="400" alt="Halaman Mixer"><br>Mixer: volume output dan volume per aplikasi</td>
+    <td align="center"><img src="docs/screenshots/player-switch.png" width="320" alt="Tombol ganti player"><br>Ganti player yang dikontrol kalau ada lebih dari satu</td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/screenshots/themes.png" width="760" alt="Tema rose, forest, midnight"><br>Tema rose, forest, dan midnight. Pilih dari menu tray, Tema.</td>
+  </tr>
 </table>
 
 Warna notch ikut cover lagu saat musik diputar, dan ikut wallpaper saat idle. Semua isi di screenshot adalah data contoh.
@@ -47,7 +54,8 @@ Warna notch ikut cover lagu saat musik diputar, dan ikut wallpaper saat idle. Se
 - Notifikasi HP lewat KDE Connect, termasuk telepon masuk
 - Maskot mata saat idle: muncul setelah 30 detik, tertidur setelah 3 menit, tersenyum saat kamu kembali. Kalau musik sedang jalan, maskot tersenyum dan mengangguk-angguk. Kalau di-pause, matanya mengantuk.
 - Saat tidak ada lagu: jam besar, tanggal (bahasa Indonesia), dan CPU/RAM/suhu
-- Tombol clipboard di tampilan idle: membuka 3 isi clipboard terakhir (klik untuk copy ulang). Panel tertutup lagi setiap notch ditutup.
+- Tombol clipboard di tampilan idle: membuka 3 isi clipboard terakhir (klik untuk copy ulang). Panel tertutup lagi setiap notch ditutup. Tombol QR di tiap item menampilkan isinya sebagai kode QR untuk dipindai HP (maksimal 500 karakter).
+- Halaman Screenshots: 5 screenshot terbaru dari `~/Pictures/Screenshots`. Seret thumbnail ke aplikasi lain, klik untuk membuka, × untuk menyembunyikan dari daftar (file tidak dihapus). Setiap screenshot baru memunculkan thumbnail sebentar di notch.
 - Halaman Mixer: volume output dan slider plus tombol bisu untuk setiap aplikasi yang sedang memutar suara
 - Kalau ada lebih dari satu player (misalnya Strawberry dan browser), tombol `⇄` di halaman Media memilih player yang dikontrol. Pilihan itu bertahan sampai player-nya ditutup.
 - Tema warna (`nusa`, `midnight`, `rose`, `forest`, atau `custom`) dan bahasa tampilan (Indonesia atau Inggris)
@@ -176,7 +184,7 @@ Semua setting ada di `~/.config/nusa/config.toml`, yang dibuat otomatis saat per
 Yang bisa diatur:
 
 - Bahasa tampilan: `language = "id"` atau `"en"`
-- Fitur mana saja yang aktif: lirik, romanisasi, gesture, statistik, clipboard, mikrofon, kamera dan share layar, mixer, notifikasi HP, download, baterai, Wi-Fi, Bluetooth
+- Fitur mana saja yang aktif: lirik, romanisasi, gesture, statistik, clipboard, mikrofon, kamera dan share layar, mixer, screenshot, notifikasi HP, download, baterai, Wi-Fi, Bluetooth
 - Berapa detik idle sebelum maskot muncul dan tertidur
 - Tema warna (`theme`), yang juga bisa dipilih dari menu tray, Tema, dan langsung berlaku tanpa reload. Atau gradien sendiri dengan `theme = "custom"`, dan apakah warnanya ikut cover lagu atau wallpaper. Selama `follow_cover`/`follow_wallpaper` aktif, warna cover/wallpaper menimpa tema; matikan keduanya untuk melihat warna tema terus.
 
@@ -234,7 +242,7 @@ Bacaan kanji diambil dari kamus tanpa melihat konteks kalimat, jadi kadang meles
 1. Naikkan `version` di `Cargo.toml`, commit.
 2. Buat tag yang sama dan push: `git tag v0.2.0 && git push repo v0.2.0`.
 3. GitHub Actions membangun `.deb`, `.tar.gz`, dan `SHA256SUMS` lalu memasangnya di halaman Releases. Tag yang tidak cocok dengan `Cargo.toml` ditolak.
-4. Setelah release jadi, update PKGBUILD: ubah `pkgver` di `packaging/aur/PKGBUILD`, lalu di folder itu jalankan `updpkgsums && makepkg --printsrcinfo > .SRCINFO`, dan commit.
+4. Workflow yang sama lalu mengarahkan `packaging/aur/PKGBUILD` dan `.SRCINFO` ke release baru (versi dan checksum) dan meng-commit-nya ke `master` sebagai `github-actions[bot]`. Jalankan `git pull` sebelum commit berikutnya. Kalau perlu manual: `packaging/aur/bump.sh <versi> <sha256 tarball>`.
 
 ## Test
 

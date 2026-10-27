@@ -41,6 +41,8 @@ progressbar.dl progress { min-height: 3px; border-radius: 2px; background: {ACCE
 .section { font-size: 11px; font-weight: 700; color: {MUTED}; }
 .notch button.player-switch { font-size: 11px; min-height: 22px; padding: 0 10px; border-radius: 999px; background: rgba(255,255,255,0.08); }
 .notch button.player-switch:hover { background: rgba(255,255,255,0.16); }
+.shot { border-radius: 8px; }
+.notch button.shot-remove { min-width: 20px; min-height: 20px; margin: 4px; background: rgba(0,0,0,0.55); opacity: 0.8; }
 .no-media { font-size: 13px; color: {MUTED}; margin: 14px 24px; }
 .notch button.page-arrow { min-width: 22px; min-height: 22px; opacity: 0.55; }
 .notch button.page-arrow:hover { opacity: 1; }

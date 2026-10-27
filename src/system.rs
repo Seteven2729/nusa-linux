@@ -352,6 +352,14 @@ pub(crate) async fn clipboard_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
                 l.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 l.set_max_width_chars(28);
             });
+            btn.set_hexpand(true);
+            let qr = gtk::Button::builder()
+                .icon_name("view-barcode-qr-symbolic")
+                .tooltip_text(tr("Tampilkan QR", "Show QR code"))
+                .css_classes(["panel-toggle"])
+                .build();
+            let (u, s, text) = (ui.clone(), state.clone(), item.clone());
+            qr.connect_clicked(move |_| show_qr(&u, &s, &text));
             let k = klipper.clone();
             btn.connect_clicked(move |_| {
                 let (k, item) = (k.clone(), item.clone());
@@ -359,13 +367,66 @@ pub(crate) async fn clipboard_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
                     let _ = k.set_clipboard_contents(&item).await;
                 });
             });
-            ui.clips.append(&btn);
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+            row.append(&btn);
+            row.append(&qr);
+            ui.clips.append(&row);
         }
         refresh_compact(&ui, &state.borrow());
         if updates.next().await.is_none() {
             return Ok(());
         }
     }
+}
+
+/// Longest clipboard text offered as a QR code; beyond this the code gets too dense to scan
+/// reliably off a laptop screen.
+const QR_MAX_CHARS: usize = 500;
+
+/// Show `text` as a QR code in place of the clipboard list.
+fn show_qr(ui: &Ui, state: &Shared, text: &str) {
+    if text.chars().count() > QR_MAX_CHARS {
+        show_alert(ui, state, tr("Terlalu panjang untuk QR", "Too long for a QR code").into());
+        return;
+    }
+    let Some((rgba, side)) = qr_rgba(text) else { return };
+    let tex = gtk::gdk::MemoryTexture::new(side as i32, side as i32, gtk::gdk::MemoryFormat::R8g8b8a8, &glib::Bytes::from_owned(rgba), side * 4);
+    ui.qr_pic.set_paintable(Some(&tex));
+    ui.qr_view.set_visible(true);
+    refresh_compact(ui, &state.borrow());
+}
+
+/// RGBA pixels of a QR code with a 2-module white border, 4 px per module (crisp, no scaling).
+fn qr_rgba(text: &str) -> Option<(Vec<u8>, usize)> {
+    let code = qrcode::QrCode::new(text.as_bytes()).ok()?;
+    let (modules, colors) = (code.width(), code.to_colors());
+    const PX: usize = 4;
+    const BORDER: usize = 2;
+    let side = (modules + 2 * BORDER) * PX;
+    let mut rgba = vec![255u8; side * side * 4];
+    for (i, c) in colors.iter().enumerate() {
+        if *c != qrcode::Color::Dark {
+            continue;
+        }
+        let (mx, my) = (i % modules + BORDER, i / modules + BORDER);
+        for y in my * PX..(my + 1) * PX {
+            for x in mx * PX..(mx + 1) * PX {
+                rgba[(y * side + x) * 4..(y * side + x) * 4 + 3].fill(0);
+            }
+        }
+    }
+    Some((rgba, side))
+}
+
+#[test]
+fn qr_code_pixels() {
+    let (rgba, side) = qr_rgba("https://github.com/Seteven2729/nusa-linux").unwrap();
+    assert_eq!(rgba.len(), side * side * 4);
+    assert_eq!(side % 4, 0);
+    let px = |x: usize, y: usize| rgba[(y * side + x) * 4];
+    assert_eq!(px(0, 0), 255, "white quiet border");
+    assert_eq!(px(8, 8), 0, "top-left finder pattern is dark");
+    assert!(qr_rgba(&"x".repeat(5000)).is_none(), "more than a QR code holds");
 }
 
 /// Phone notifications forwarded by KDE Connect (calls show up as the dialer's notification).

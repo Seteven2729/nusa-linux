@@ -11,6 +11,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      sha256: ${{ steps.tarball.outputs.sha256 }}
     # Built on Ubuntu 26.04: the .deb's dependencies come from its repos, and the same
     # binary runs on Arch (glibc and GTK there are newer).
     container: ubuntu:26.04
@@ -40,12 +42,14 @@ jobs:
           cp target/debian/*.deb .
 
       - name: Package tarball
+        id: tarball
         run: |
           name="nusa-linux-${GITHUB_REF_NAME}-x86_64-linux"
           mkdir "$name"
           cp target/release/nusa-linux README.md LICENSE "$name/"
           tar czf "$name.tar.gz" "$name"
           sha256sum *.deb *.tar.gz > SHA256SUMS
+          echo "sha256=$(sha256sum "$name.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - uses: softprops/action-gh-release@v2
         with:
@@ -54,3 +58,24 @@ jobs:
             *.tar.gz
             SHA256SUMS
           generate_release_notes: true
+
+  # Point packaging/aur at the release just published, so the PKGBUILD never lags behind.
+  aur:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+      - name: Update PKGBUILD and .SRCINFO
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          packaging/aur/bump.sh "$version" "${{ needs.release.outputs.sha256 }}"
+          if git diff --quiet; then
+            echo "PKGBUILD already points at $version"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Update PKGBUILD to $version"
+          git push

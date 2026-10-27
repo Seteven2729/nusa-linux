@@ -23,6 +23,7 @@ stats = true        # CPU/RAM/temperature in the idle view
 clipboard = true    # clipboard button in the idle view (Klipper)
 mic = true          # orange dot while an app records from a microphone
 mixer = true        # volume mixer page: output and per-app volume
+screenshots = true  # screenshots page and a preview when Spectacle saves one
 camera = true       # green dot while a camera is on, red dot while the screen is shared
 phone = true        # phone notifications via KDE Connect
 downloads = true    # download progress bar
@@ -56,6 +57,7 @@ pub(crate) struct Config {
     pub(crate) clipboard: bool,
     pub(crate) mic: bool,
     pub(crate) mixer: bool,
+    pub(crate) screenshots: bool,
     pub(crate) camera: bool,
     pub(crate) phone: bool,
     pub(crate) downloads: bool,
@@ -141,6 +143,7 @@ fn parse_config(text: &str) -> Config {
         clipboard: flag("features", "clipboard"),
         mic: flag("features", "mic"),
         mixer: flag("features", "mixer"),
+        screenshots: flag("features", "screenshots"),
         camera: flag("features", "camera"),
         phone: flag("features", "phone"),
         downloads: flag("features", "downloads"),

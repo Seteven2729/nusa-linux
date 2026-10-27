@@ -14,9 +14,10 @@ mod lyrics;
 mod system;
 mod mascot;
 mod mixer;
+mod screenshots;
 mod tray;
 
-use {capture::*, config::*, dbus::*, lyrics::*, mascot::*, media::*, mixer::*, style::*, system::*, tray::*};
+use {capture::*, config::*, dbus::*, lyrics::*, mascot::*, media::*, mixer::*, screenshots::*, style::*, system::*, tray::*};
 
 #[derive(Clone)]
 struct Ui {
@@ -59,6 +60,11 @@ struct Ui {
     dl_recent: gtk::Box,
     player_btn: gtk::Button,
     mixer_box: gtk::Box,
+    shots_row: gtk::Box,
+    /// Screenshot thumbnail shown next to the "saved" alert.
+    shot_thumb: gtk::Image,
+    qr_view: gtk::Box,
+    qr_pic: gtk::Picture,
     pager: gtk::Box,
     top_row: gtk::Revealer,
     /// The themed stylesheet; reloaded when a theme is picked from the tray.
@@ -120,6 +126,10 @@ struct State {
     players: Vec<(String, String)>,
     /// Player chosen with the switch button; kept until it closes.
     pinned: Option<String>,
+    /// Newest screenshots, newest first (paths in ~/Pictures/Screenshots).
+    shots: Vec<PathBuf>,
+    /// Picture shown with the current alert (a new screenshot's thumbnail).
+    alert_thumb: Option<gtk::gdk::Texture>,
     /// Asks the MPRIS loop to pick again (after the switch button changes `pinned`).
     repick: Option<async_channel::Sender<()>>,
     /// Every download in progress, by app, for the downloads page.
@@ -204,6 +214,8 @@ fn build_ui(app: &gtk::Application) {
     top.append(&share);
     top.append(&cam);
     top.append(&mic);
+    let shot_thumb = gtk::Image::builder().pixel_size(28).css_classes(["mini-art"]).visible(false).build();
+    top.append(&shot_thumb);
     top.append(&mini_art);
     top.append(&compact);
     top.append(&mascot);
@@ -333,9 +345,25 @@ fn build_ui(app: &gtk::Application) {
     let media_page = gtk::Box::new(gtk::Orientation::Horizontal, 16);
     media_page.append(&body);
     media_page.append(&lyrics_scroll);
+    // QR of one clipboard item, replacing the list until clicked.
+    let qr_pic = gtk::Picture::builder().can_shrink(false).halign(gtk::Align::Center).build();
+    let qr_view = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    qr_view.append(&qr_pic);
+    qr_view.append(
+        &gtk::Label::builder()
+            .label(tr("Pindai dengan HP · klik untuk kembali", "Scan with your phone · click to go back"))
+            .css_classes(["time"])
+            .build(),
+    );
+    qr_view.set_visible(false);
+    let back = gtk::GestureClick::new();
+    let q = qr_view.clone();
+    back.connect_released(move |_, _, _, _| q.set_visible(false));
+    qr_view.add_controller(back);
     let home_page = gtk::Box::new(gtk::Orientation::Horizontal, 16);
     home_page.append(&home_body);
     home_page.append(&clips);
+    home_page.append(&qr_view);
     // Pages slide sideways, and the notch eases to the new page's size instead of jumping.
     let pages = gtk::Stack::builder()
         .transition_type(gtk::StackTransitionType::SlideLeftRight)
@@ -353,8 +381,23 @@ fn build_ui(app: &gtk::Application) {
     if cfg().mixer {
         pages.add_named(&mixer_box, Some("mixer"));
     }
+    // Screenshots page: thumbnail row, filled by screenshots.rs.
+    let shots_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let shots_page = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    shots_page.append(&gtk::Label::builder().label("Screenshots").css_classes(["section"]).xalign(0.0).build());
+    shots_page.append(&shots_row);
+    shots_page.append(
+        &gtk::Label::builder()
+            .label(tr("Seret ke aplikasi lain · klik untuk membuka", "Drag into another app · click to open"))
+            .css_classes(["time"])
+            .xalign(0.0)
+            .build(),
+    );
     if cfg().downloads {
         pages.add_named(&downloads_page, Some("downloads"));
+    }
+    if cfg().screenshots {
+        pages.add_named(&shots_page, Some("screenshots"));
     }
     let arrow = |icon: &str| {
         gtk::Button::builder().icon_name(icon).css_classes(["page-arrow"]).valign(gtk::Align::Center).build()
@@ -429,6 +472,10 @@ fn build_ui(app: &gtk::Application) {
         dl_recent,
         player_btn,
         mixer_box,
+        shots_row,
+        shot_thumb,
+        qr_view,
+        qr_pic,
         pager,
         top_row,
         css: css.clone(),
@@ -519,6 +566,9 @@ fn build_ui(app: &gtk::Application) {
     }
     if cfg().mixer {
         spawn_mixer_watch(&ui);
+    }
+    if cfg().screenshots {
+        spawn_screenshot_watch(&ui, &state);
     }
 
     // Gestures on the notch: wheel/two-finger up-down = volume, left-right swipe = next/previous,
@@ -817,7 +867,9 @@ fn refresh_compact(ui: &Ui, st: &State) {
     ui.stats.set_visible(cfg().stats);
     let has_clips = ui.clips.first_child().is_some();
     ui.clip_btn.set_visible(has_clips);
-    ui.clips.set_visible(open && !on_media && has_clips && ui.clip_btn.is_active());
+    ui.clips.set_visible(open && !on_media && has_clips && ui.clip_btn.is_active() && !ui.qr_view.is_visible());
+    ui.shot_thumb.set_paintable(st.alert_thumb.as_ref());
+    ui.shot_thumb.set_visible(st.alert.is_some() && st.alert_thumb.is_some());
     let order = page_order();
     let i = order.iter().position(|p| Some(*p) == page.as_deref()).unwrap_or(0);
     ui.page_prev.set_sensitive(i > 0);
@@ -908,6 +960,7 @@ fn set_open(ui: &Ui, state: &Shared, open: bool) {
     } else {
         ui.expanded.set_reveal_child(false);
         ui.clip_btn.set_active(false);
+        ui.qr_view.set_visible(false);
         if !ui.expanded.is_child_revealed() {
             // Closed during the widen phase: nothing to slide up, narrow right away.
             ui.pager.set_visible(false);
@@ -925,6 +978,9 @@ fn page_order() -> Vec<&'static str> {
     }
     if cfg().downloads {
         order.push("downloads");
+    }
+    if cfg().screenshots {
+        order.push("screenshots");
     }
     order
 }
@@ -945,6 +1001,7 @@ fn show_alert_for(ui: &Ui, state: &Shared, text: String, secs: u32) {
     let seq = {
         let mut st = state.borrow_mut();
         st.alert = Some(text);
+        st.alert_thumb = None;
         st.alert_seq += 1;
         st.alert_seq
     };
