@@ -832,7 +832,44 @@ fn build_ui(app: &gtk::Application) {
         });
     }
 
+    #[cfg(debug_assertions)]
+    demo(&ui, &state);
     window.present();
+}
+
+/// Debug builds only: NUSA_DEMO puts the notch in a state for tests and screenshots,
+/// 3 s after start (see tools/shot.sh). Comma-separated:
+/// `page=<home|media|mixer|downloads|screenshots>` opens on that page,
+/// `lyrics` / `clips` turn on those panels, `mascot` wakes the mascot,
+/// `mic` shows the mic dot, `alert=<text>` shows a popup.
+#[cfg(debug_assertions)]
+fn demo(ui: &Ui, state: &Shared) {
+    let Ok(spec) = std::env::var("NUSA_DEMO") else { return };
+    let (ui, state) = (ui.clone(), state.clone());
+    glib::timeout_add_seconds_local_once(3, move || {
+        let mut st = state.borrow_mut();
+        st.mic_apps = if spec.split(',').any(|o| o == "mic") { vec!["Teams".into()] } else { vec![] };
+        drop(st);
+        for opt in spec.split(',') {
+            match opt.split_once('=') {
+                Some(("page", page)) => {
+                    ui.pages.set_visible_child_full(page, gtk::StackTransitionType::None);
+                    set_open(&ui, &state, true);
+                }
+                Some(("alert", text)) => show_alert_for(&ui, &state, text.into(), 30),
+                _ if opt == "mascot" => set_mood(&ui, &state, Mood::Awake),
+                _ => {}
+            }
+        }
+        // Panels need the open notch, which set_open reveals after its widen step.
+        let (u, s, spec) = (ui.clone(), state.clone(), spec.clone());
+        glib::timeout_add_local_once(Duration::from_millis(600), move || {
+            u.lyrics_btn.set_active(spec.split(',').any(|o| o == "lyrics"));
+            u.clip_btn.set_active(spec.split(',').any(|o| o == "clips"));
+            refresh_compact(&u, &s.borrow());
+        });
+        refresh_compact(&ui, &state.borrow());
+    });
 }
 
 fn refresh_compact(ui: &Ui, st: &State) {

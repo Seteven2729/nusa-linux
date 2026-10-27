@@ -61,6 +61,12 @@ pub(crate) async fn pick_player(
     let mut alive = vec![];
     for name in dbus.list_names().await.unwrap_or_default() {
         let Some(suffix) = name.strip_prefix("org.mpris.MediaPlayer2.") else { continue };
+        // Debug builds: NUSA_ONLY_PLAYER=<text> ignores players whose bus name lacks it, so
+        // tools/ can test with a fake player while the user's real one keeps playing.
+        #[cfg(debug_assertions)]
+        if std::env::var("NUSA_ONLY_PLAYER").is_ok_and(|o| !name.contains(&o)) {
+            continue;
+        }
         let Ok(owner) = dbus.get_name_owner(name.as_ref()).await else { continue };
         let Ok(p) = player(conn, owner.to_string()).await else { continue };
         let Ok(status) = p.playback_status().await else { continue };
