@@ -48,6 +48,7 @@ struct Ui {
     accent: gtk::CssProvider,
     wall: gtk::CssProvider,
     dl_bar: gtk::ProgressBar,
+    dl_row: gtk::Box,
     /// Open view has two pages: "home" (clock, stats, clipboard) and "media" (player).
     pages: gtk::Stack,
     page_prev: gtk::Button,
@@ -263,7 +264,7 @@ fn build_ui(app: &gtk::Application) {
     text.append(&title);
     text.append(&artist);
     let lyrics_btn = gtk::ToggleButton::builder()
-        .icon_name("format-justify-left-symbolic")
+        .icon_name(first_icon(&["view-media-lyrics-symbolic", "format-justify-left-symbolic"]))
         .tooltip_text(tr("Lirik", "Lyrics"))
         .css_classes(["panel-toggle"])
         .valign(gtk::Align::Center)
@@ -426,8 +427,13 @@ fn build_ui(app: &gtk::Application) {
         .build();
     notch.append(&top_row);
     // Thin download bar under the top row; stays even with music or in minimal mode.
-    let dl_bar = gtk::ProgressBar::builder().css_classes(["dl"]).visible(false).build();
-    notch.append(&dl_bar);
+    // The arrow tells it apart from the song, which uses the same accent color.
+    let dl_bar = gtk::ProgressBar::builder().css_classes(["dl"]).hexpand(true).valign(gtk::Align::Center).build();
+    let dl_row = gtk::Box::builder().spacing(6).css_classes(["dl-row"]).visible(false).build();
+    let dl_icon = first_icon(&["download-symbolic", "folder-download-symbolic"]);
+    dl_row.append(&gtk::Image::builder().icon_name(dl_icon).pixel_size(12).build());
+    dl_row.append(&dl_bar);
+    notch.append(&dl_row);
     notch.append(&lyric);
     notch.append(&lyric_rom);
     notch.append(&expanded);
@@ -461,6 +467,7 @@ fn build_ui(app: &gtk::Application) {
         accent: gtk::CssProvider::new(),
         wall: gtk::CssProvider::new(),
         dl_bar,
+        dl_row,
         pages,
         page_prev,
         page_next,
@@ -931,7 +938,7 @@ fn refresh_compact(ui: &Ui, st: &State) {
     ui.share.set_visible(st.sharing);
     // The mascot stands in for the clock (or the song title) once you have been away a while.
     let mascot = st.mood != Mood::None && st.alert.is_none() && st.download.is_none();
-    ui.dl_bar.set_visible(!open && st.download.is_some());
+    ui.dl_row.set_visible(!open && st.download.is_some());
     if let Some((_, p)) = &st.download {
         ui.dl_bar.set_fraction(*p);
     }
@@ -945,10 +952,19 @@ fn refresh_compact(ui: &Ui, st: &State) {
     } else {
         ui.notch.remove_css_class("open");
     }
-    if !open && !show_compact && !ui.lyric.is_visible() {
-        ui.notch.add_css_class("thin");
-    } else {
-        ui.notch.remove_css_class("thin");
+    let thin = !open && !show_compact && !ui.lyric.is_visible();
+    // While music plays the closed notch keeps one width, so long titles and each new lyric
+    // line don't make it grow and shrink. The labels then ellipsize to that width.
+    let fixed = media && !thin && !ui.want_open.get();
+    for (class, on) in [("thin", thin), ("music", fixed)] {
+        if on {
+            ui.notch.add_css_class(class);
+        } else {
+            ui.notch.remove_css_class(class);
+        }
+    }
+    for (label, chars) in [(&ui.compact, 32), (&ui.lyric, 40), (&ui.lyric_rom, 48)] {
+        label.set_max_width_chars(if fixed { 1 } else { chars });
     }
     // Player switch: name of the one in control, only when there is a choice.
     let current = st.player.as_ref().map(|p| p.inner().destination().to_string());
@@ -1020,6 +1036,13 @@ fn page_order() -> Vec<&'static str> {
         order.push("screenshots");
     }
     order
+}
+
+/// The first of `names` anywhere in the icon theme or the themes it inherits.
+/// (A multi-name GIcon would stop at the first theme holding any of them, often the fallback.)
+fn first_icon(names: &[&'static str]) -> &'static str {
+    let theme = gtk::IconTheme::for_display(&gtk::gdk::Display::default().unwrap());
+    names.iter().copied().find(|n| theme.has_icon(n)).unwrap_or(names[names.len() - 1])
 }
 
 /// Restart a one-shot CSS animation by toggling its class.

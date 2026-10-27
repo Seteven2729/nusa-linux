@@ -13,6 +13,7 @@ window { background: transparent; }
 }
 .notch.open { border-radius: 0 0 28px 28px; padding: 8px 16px 14px; }
 .notch.thin { padding: 0; min-height: 5px; box-shadow: none; }
+.notch.music { min-width: 272px; }
 .compact { font-size: 13px; font-weight: 600; }
 .mini-art { border-radius: 5px; }
 .art { border-radius: 12px; }
@@ -20,11 +21,12 @@ window { background: transparent; }
 .title.clock { font-size: 30px; font-weight: 700; font-feature-settings: 'tnum'; }
 .artist { font-size: 12px; color: {MUTED}; }
 .time { font-size: 11px; color: {MUTED}; font-feature-settings: 'tnum'; }
-.lyric { font-size: 13px; font-weight: 600; color: #fff; opacity: 0.9; margin-top: 2px; }
+.lyric { font-size: 13px; font-weight: 400; color: #fff; opacity: 0.7; margin-top: 2px; }
 
 .eq { min-height: 14px; }
 .eq > box { background: {ACCENT}; border-radius: 2px; min-width: 3px; min-height: 3px; }
-progressbar.dl { margin-top: 3px; }
+.dl-row { margin-top: 3px; }
+.dl-row image { opacity: 0.7; }
 progressbar.dl trough { min-height: 3px; min-width: 0; border-radius: 2px; background: rgba(255,255,255,0.22); border: none; }
 progressbar.dl progress { min-height: 3px; border-radius: 2px; background: {ACCENT}; border: none; }
 
