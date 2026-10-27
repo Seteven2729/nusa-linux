@@ -17,7 +17,8 @@ Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya.
 - Maskot mata saat idle: muncul setelah 30 detik, tertidur setelah 3 menit, tersenyum saat kamu kembali. Kalau musik sedang jalan, maskot tersenyum dan mengangguk-angguk. Kalau di-pause, matanya mengantuk.
 - Saat tidak ada lagu: jam besar, tanggal (bahasa Indonesia), dan CPU/RAM/suhu
 - Tombol clipboard di tampilan idle: membuka 3 isi clipboard terakhir (klik untuk copy ulang). Panel tertutup lagi setiap notch ditutup.
-- Menu tray: start with login, minimal notch (garis tipis), maskot, exit
+- Menu tray: start with login, minimal notch (garis tipis), maskot, edit settings, reload, exit
+- Hidup lagi sendiri kalau crash (systemd user service)
 
 ## Gesture
 
@@ -93,19 +94,41 @@ Binary terpasang di `~/.local/bin/nusa-linux`.
 
 Untuk autostart saat login, klik ikon Nusa di system tray dan centang `Start with login`. Ikonnya berupa pil putih. Di KDE, kalau tidak terlihat, cek panah `^` di tray.
 
+`Start with login` memasang systemd user service `nusa-linux.service`. Selain jalan otomatis saat login, service ini menyalakan Nusa lagi 2 detik setelah crash. Exit dari tray tidak dianggap crash, jadi Nusa tetap mati. Status dan log:
+
+```sh
+systemctl --user status nusa-linux.service
+journalctl --user -u nusa-linux.service
+```
+
+## Setting
+
+Semua setting ada di `~/.config/nusa/config.toml`, yang dibuat otomatis saat pertama kali jalan. Setiap baris ada penjelasannya. Buka lewat tray, `Edit settings`, lalu pilih `Reload` untuk menerapkan perubahan.
+
+Yang bisa diatur:
+
+- Fitur mana saja yang aktif: lirik, romanisasi, gesture, statistik, clipboard, mikrofon, notifikasi HP, download, baterai, Wi-Fi, Bluetooth
+- Berapa detik idle sebelum maskot muncul dan tertidur
+- Warna gradien notch, dan apakah warnanya ikut cover lagu atau wallpaper
+
+Nilai yang salah atau hilang memakai default, jadi file yang rusak tidak membuat Nusa gagal jalan.
+
 ## Update setelah mengubah kode
 
 ```sh
 cd ~/nusa-linux
 cargo install --path . --root ~/.local
-pkill -x nusa-linux; ~/.local/bin/nusa-linux &
+systemctl --user restart nusa-linux.service
 ```
+
+Kalau tidak memakai `Start with login`, ganti baris terakhir dengan `pkill -x nusa-linux; ~/.local/bin/nusa-linux &`.
 
 ## Uninstall
 
 ```sh
+systemctl --user disable --now nusa-linux.service
 pkill -x nusa-linux
-rm ~/.local/bin/nusa-linux ~/.config/autostart/nusa-linux.desktop
+rm ~/.local/bin/nusa-linux ~/.config/systemd/user/nusa-linux.service
 rm -r ~/.config/nusa ~/.cache/nusa
 ```
 
@@ -113,9 +136,8 @@ rm -r ~/.config/nusa ~/.cache/nusa
 
 | Path | Isi |
 |---|---|
-| `~/.config/autostart/nusa-linux.desktop` | Autostart, dibuat/dihapus lewat tray |
-| `~/.config/nusa/minimal` | Ada = mode minimal aktif |
-| `~/.config/nusa/no-mascot` | Ada = maskot mati |
+| `~/.config/nusa/config.toml` | Semua setting |
+| `~/.config/systemd/user/nusa-linux.service` | Autostart dan restart otomatis, dipasang lewat tray |
 | `~/.cache/nusa/lyrics/` | Lirik yang sudah pernah diambil, supaya langsung muncul di pemutaran berikutnya |
 
 ## Privasi
@@ -129,6 +151,7 @@ Isi clipboard hanya tampil setelah tombol clipboard diklik. Notifikasi HP muncul
 - **Notch tidak muncul.** Jalankan `nusa-linux` dari terminal tanpa `&` dan lihat errornya. Pastikan sesi Wayland: `echo $XDG_SESSION_TYPE` harus `wayland`.
 - **Lagu tidak terdeteksi.** Cek apakah player terdaftar di MPRIS: `busctl --user list | grep mpris`.
 - **Titik mikrofon tidak muncul.** Cek apakah ada stream yang aktif: `pactl list source-outputs short`. Titik hanya tampil saat notch tertutup.
+- **Nusa mati terus setelah crash.** systemd berhenti mencoba kalau crash berulang dalam waktu singkat. Lihat penyebabnya di `journalctl --user -u nusa-linux.service`, lalu `systemctl --user reset-failed nusa-linux.service` dan start lagi.
 - **Muncul dua notch.** Tidak seharusnya terjadi, Nusa hanya mengizinkan satu instance. Jalankan `pkill -x nusa-linux` lalu buka lagi.
 
 ## Lisensi
