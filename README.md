@@ -14,7 +14,7 @@ Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya. Notch yang 
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/closed-music.png" width="320" alt="Notch tertutup saat musik diputar"><br>Tertutup saat musik diputar: lirik dan romanisasinya</td>
+    <td align="center"><img src="docs/screenshots/closed-music.png" width="297" alt="Notch tertutup saat musik diputar"><br>Tertutup saat musik diputar: lirik dan romanisasinya</td>
     <td align="center"><img src="docs/screenshots/idle.png" width="260" alt="Tampilan idle dengan jam, tanggal, dan statistik"><br>Idle: jam, tanggal, CPU/RAM/suhu</td>
   </tr>
   <tr>
@@ -27,6 +27,9 @@ Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya. Notch yang 
   <tr>
     <td align="center"><img src="docs/screenshots/alert.png" width="300" alt="Popup notifikasi HP"><br>Notifikasi HP lewat KDE Connect</td>
     <td align="center"><img src="docs/screenshots/download.png" width="240" alt="Progres download dan titik mikrofon"><br>Progres download, titik oranye = mikrofon dipakai</td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/screenshots/downloads-page.png" width="420" alt="Halaman Download"><br>Halaman Download: semua download yang berjalan dan file terbaru</td>
   </tr>
 </table>
 
@@ -94,7 +97,17 @@ nusa-linux &
 
 `apt` ikut memasang GTK4 dan gtk4-layer-shell. Ubuntu 24.04 belum bisa, karena repo-nya tidak punya gtk4-layer-shell.
 
-**Arch Linux**
+**Arch Linux, lewat PKGBUILD** (dikelola pacman, bersih saat uninstall)
+
+```sh
+git clone https://github.com/Seteven2729/nusa-linux.git
+cd nusa-linux/packaging/aur
+makepkg -si
+```
+
+`makepkg` mengunduh binary dari release, memeriksa checksum-nya, lalu memasang paket `nusa-linux-bin`. Hapus dengan `sudo pacman -R nusa-linux-bin`.
+
+**Arch Linux, manual**
 
 ```sh
 sudo pacman -S --needed gtk4 gtk4-layer-shell
@@ -217,6 +230,7 @@ Bacaan kanji diambil dari kamus tanpa melihat konteks kalimat, jadi kadang meles
 1. Naikkan `version` di `Cargo.toml`, commit.
 2. Buat tag yang sama dan push: `git tag v0.2.0 && git push repo v0.2.0`.
 3. GitHub Actions membangun `.deb`, `.tar.gz`, dan `SHA256SUMS` lalu memasangnya di halaman Releases. Tag yang tidak cocok dengan `Cargo.toml` ditolak.
+4. Setelah release jadi, update PKGBUILD: ubah `pkgver` di `packaging/aur/PKGBUILD`, lalu di folder itu jalankan `updpkgsums && makepkg --printsrcinfo > .SRCINFO`, dan commit.
 
 ## Test
 

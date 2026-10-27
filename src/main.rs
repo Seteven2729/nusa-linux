@@ -56,6 +56,14 @@ struct Ui {
     head: gtk::Box,
     dl_active: gtk::Box,
     dl_recent: gtk::Box,
+    pager: gtk::Box,
+    top_row: gtk::Revealer,
+    /// Holds the notch's min-width while opening/closing; empty means the stylesheet default.
+    width_css: gtk::CssProvider,
+    /// Hover wants the notch open (true even during the widen-first phase).
+    want_open: Rc<std::cell::Cell<bool>>,
+    /// Bumped on every open/close so a stale delayed step can tell it was superseded.
+    anim: Rc<std::cell::Cell<u32>>,
 }
 
 /// What the idle mascot is doing; `None` means it is hidden and the clock shows.
@@ -346,7 +354,15 @@ fn build_ui(app: &gtk::Application) {
 
     let notch = gtk::Box::new(gtk::Orientation::Vertical, 2);
     notch.add_css_class("notch");
-    notch.append(&top);
+    // The top row collapses with its own slide, so while the open content slides in the
+    // notch's height never dips (hiding the row instantly flashed a 2px-tall notch).
+    let top_row = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::SlideDown)
+        .transition_duration(200)
+        .reveal_child(true)
+        .child(&top)
+        .build();
+    notch.append(&top_row);
     // Thin download bar under the top row; stays even with music or in minimal mode.
     let dl_bar = gtk::ProgressBar::builder().css_classes(["dl"]).visible(false).build();
     notch.append(&dl_bar);
@@ -392,6 +408,11 @@ fn build_ui(app: &gtk::Application) {
         head,
         dl_active,
         dl_recent,
+        pager,
+        top_row,
+        width_css: gtk::CssProvider::new(),
+        want_open: Default::default(),
+        anim: Default::default(),
     };
     // Cover-tinted gradient lives in its own provider so it can be swapped per track.
     gtk::style_context_add_provider_for_display(
@@ -404,6 +425,22 @@ fn build_ui(app: &gtk::Application) {
         &ui.wall,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
     );
+    gtk::style_context_add_provider_for_display(
+        &gtk::gdk::Display::default().unwrap(),
+        &ui.width_css,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
+    );
+    // A collapsed GtkRevealer still reserves its child's width, which kept the closed notch
+    // as wide as the open one. Hide the content entirely while closed.
+    ui.pager.set_visible(false);
+    // Closing, second step: once the content has slid up, hide it and let the notch narrow back.
+    let u = ui.clone();
+    ui.expanded.connect_child_revealed_notify(move |r| {
+        if !r.is_child_revealed() && !u.want_open.get() {
+            u.pager.set_visible(false);
+            u.width_css.load_from_string("");
+        }
+    });
     let state: Shared = Rc::new(RefCell::new(State {
         minimal: cfg().minimal,
         mascot_off: !cfg().mascot,
@@ -534,20 +571,21 @@ fn build_ui(app: &gtk::Application) {
     let (u1, s1, g1) = (ui.clone(), state.clone(), hover_gen.clone());
     hover.connect_enter(move |_, _, _| {
         g1.set(g1.get() + 1);
-        if !u1.expanded.reveals_child() {
+        if !u1.want_open.get() {
             // Open on the page that matters right now, without a sideways slide.
-            let st = s1.borrow();
-            let page = if st.player.is_some() && !st.track.is_empty() {
-                "media"
-            } else if !st.downloads.is_empty() && cfg().downloads {
-                "downloads"
-            } else {
-                "home"
+            let page = {
+                let st = s1.borrow();
+                if st.player.is_some() && !st.track.is_empty() {
+                    "media"
+                } else if !st.downloads.is_empty() && cfg().downloads {
+                    "downloads"
+                } else {
+                    "home"
+                }
             };
             u1.pages.set_visible_child_full(page, gtk::StackTransitionType::None);
-            u1.expanded.set_reveal_child(true);
+            set_open(&u1, &s1, true);
         }
-        refresh_compact(&u1, &s1.borrow());
     });
     let (u2, s2) = (ui.clone(), state.clone());
     hover.connect_leave(move |_| {
@@ -556,9 +594,7 @@ fn build_ui(app: &gtk::Application) {
         let (u, s, g) = (u2.clone(), s2.clone(), hover_gen.clone());
         glib::timeout_add_local_once(Duration::from_millis(250), move || {
             if g.get() == seq {
-                u.expanded.set_reveal_child(false);
-                u.clip_btn.set_active(false);
-                refresh_compact(&u, &s.borrow());
+                set_open(&u, &s, false);
             }
         });
     });
@@ -758,18 +794,21 @@ fn refresh_compact(ui: &Ui, st: &State) {
     }
     // When open, the expanded view shows either the track or a big clock, so the top row would only repeat it.
     let show_compact = st.alert.is_some() || (!open && !st.minimal);
-    ui.mic.set_visible(!st.mic_apps.is_empty() && show_compact);
-    ui.cam.set_visible((!st.cam_apps.is_empty() || st.cam_pw) && show_compact);
-    ui.share.set_visible(st.sharing && show_compact);
+    ui.top_row.set_reveal_child(show_compact);
+    // Items inside the row keep their visibility while it slides away, so the slide has
+    // something to animate; the row's revealer alone decides whether it shows.
+    ui.mic.set_visible(!st.mic_apps.is_empty());
+    ui.cam.set_visible(!st.cam_apps.is_empty() || st.cam_pw);
+    ui.share.set_visible(st.sharing);
     // The mascot stands in for the clock (or the song title) once you have been away a while.
-    let mascot = st.mood != Mood::None && show_compact && st.alert.is_none() && st.download.is_none();
+    let mascot = st.mood != Mood::None && st.alert.is_none() && st.download.is_none();
     ui.dl_bar.set_visible(!open && st.download.is_some());
     if let Some((_, p)) = &st.download {
         ui.dl_bar.set_fraction(*p);
     }
     ui.mascot.set_visible(mascot);
-    ui.compact.set_visible(show_compact && !mascot);
-    let media = show_compact && st.playing && st.alert.is_none();
+    ui.compact.set_visible(!mascot);
+    let media = st.playing && st.alert.is_none();
     ui.eq.set_visible(media);
     ui.mini_art.set_visible(media && !mascot && ui.mini_art.paintable().is_some());
     if ui.expanded.reveals_child() {
@@ -793,6 +832,44 @@ fn refresh_compact(ui: &Ui, st: &State) {
     let now = glib::DateTime::now_local().ok();
     ui.clock.set_label(&now.as_ref().and_then(|d| d.format("%H:%M").ok()).unwrap_or_default());
     ui.date.set_label(&now.as_ref().map(tanggal).unwrap_or_default());
+}
+
+/// Open or close the notch without the width ever jumping.
+/// Opening widens the closed notch to the open content's width first (a CSS min-width
+/// transition), then slides the content down. Closing slides it up first; the
+/// child-revealed handler then lets the notch narrow back.
+fn set_open(ui: &Ui, state: &Shared, open: bool) {
+    if ui.want_open.get() == open {
+        return;
+    }
+    ui.want_open.set(open);
+    let seq = ui.anim.get() + 1;
+    ui.anim.set(seq);
+    if open {
+        refresh_compact(ui, &state.borrow()); // so the measurement sees the right page contents
+        // Measure the open content without showing it (visible on and off within this frame).
+        ui.pager.set_visible(true);
+        let (_, natural, _, _) = ui.pager.measure(gtk::Orientation::Horizontal, -1);
+        ui.pager.set_visible(false);
+        ui.width_css.load_from_string(&format!(".notch {{ min-width: {natural}px; }}"));
+        let (u, s) = (ui.clone(), state.clone());
+        glib::timeout_add_local_once(Duration::from_millis(170), move || {
+            if u.anim.get() == seq {
+                u.pager.set_visible(true);
+                u.expanded.set_reveal_child(true);
+                refresh_compact(&u, &s.borrow());
+            }
+        });
+    } else {
+        ui.expanded.set_reveal_child(false);
+        ui.clip_btn.set_active(false);
+        if !ui.expanded.is_child_revealed() {
+            // Closed during the widen phase: nothing to slide up, narrow right away.
+            ui.pager.set_visible(false);
+            ui.width_css.load_from_string("");
+        }
+        refresh_compact(ui, &state.borrow());
+    }
 }
 
 /// Pages left to right, as the arrows walk them.

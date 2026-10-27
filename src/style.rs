@@ -7,7 +7,7 @@ window { background: transparent; }
   font-family: Inter, 'Noto Sans', sans-serif;
   border-radius: 0 0 20px 20px; padding: 5px 14px 7px; min-width: 150px;
   margin: 0 14px 14px; box-shadow: 0 6px 20px rgba(4,12,40,0.6);
-  transition: border-radius 180ms ease, padding 180ms ease;
+  transition: border-radius 180ms ease, padding 180ms ease, min-width 180ms ease-out;
 }
 .notch.open { border-radius: 0 0 28px 28px; padding: 8px 16px 14px; }
 .notch.thin { padding: 0; min-height: 5px; box-shadow: none; }

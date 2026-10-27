@@ -1,0 +1,32 @@
+# Maintainer: Seteven2729 <79296055+Seteven2729@users.noreply.github.com>
+# Installs the prebuilt binary from the GitHub release. After a new release:
+# bump pkgver, run `updpkgsums`, then `makepkg --printsrcinfo > .SRCINFO`.
+pkgname=nusa-linux-bin
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="A notch at the top of the screen for Wayland desktops: music, lyrics, alerts"
+arch=('x86_64')
+url="https://github.com/Seteven2729/nusa-linux"
+license=('GPL-3.0-or-later')
+depends=('gtk4' 'gtk4-layer-shell' 'glib2' 'cairo' 'pango' 'gdk-pixbuf2' 'graphene' 'glibc' 'gcc-libs')
+optdepends=(
+  'libpulse: microphone indicator (pactl)'
+  'wireplumber: volume gesture (wpctl)'
+  'pipewire: camera and screen-share indicators (pw-dump)'
+  'kdeconnect: phone notifications'
+  'upower: charger alerts'
+  'networkmanager: Wi-Fi alerts'
+  'bluez: headphone alerts'
+)
+provides=('nusa-linux')
+conflicts=('nusa-linux')
+# Prebuilt binary: no debug symbols to split out.
+options=('!debug')
+source=("$url/releases/download/v$pkgver/nusa-linux-v$pkgver-x86_64-linux.tar.gz")
+sha256sums=('6b2df93e30405958970804490f568295b5cbd7ca07d8d8aa46a0e48b9f81cc85')
+
+package() {
+  cd "nusa-linux-v$pkgver-x86_64-linux"
+  install -Dm755 nusa-linux "$pkgdir/usr/bin/nusa-linux"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
