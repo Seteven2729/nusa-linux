@@ -1,6 +1,6 @@
 pkgbase = nusa-linux-bin
 	pkgdesc = A notch at the top of the screen for Wayland desktops: music, lyrics, alerts
-	pkgver = 0.2.0
+	pkgver = 0.2.1
 	pkgrel = 1
 	url = https://github.com/Seteven2729/nusa-linux
 	arch = x86_64
@@ -24,7 +24,7 @@ pkgbase = nusa-linux-bin
 	provides = nusa-linux
 	conflicts = nusa-linux
 	options = !debug
-	source = https://github.com/Seteven2729/nusa-linux/releases/download/v0.2.0/nusa-linux-v0.2.0-x86_64-linux.tar.gz
-	sha256sums = 6b2df93e30405958970804490f568295b5cbd7ca07d8d8aa46a0e48b9f81cc85
+	source = https://github.com/Seteven2729/nusa-linux/releases/download/v0.2.1/nusa-linux-v0.2.1-x86_64-linux.tar.gz
+	sha256sums = 1a9d67f2df9ae4dcd91d0f0ceb6c409e5454d2cd10043e597358304a380e881e
 
 pkgname = nusa-linux-bin
