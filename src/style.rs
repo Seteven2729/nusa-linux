@@ -36,6 +36,17 @@ progressbar.dl progress { min-height: 3px; border-radius: 2px; background: #8fd8
 .notch button:hover { background: rgba(255,255,255,0.15); }
 .notch button.play { background: #fff; color: #061338; }
 .notch button.play:hover { background: #dce8ff; }
+.section { font-size: 11px; font-weight: 700; color: #b9cdf5; }
+.no-media { font-size: 13px; color: #b9cdf5; margin: 14px 24px; }
+.notch button.page-arrow { min-width: 22px; min-height: 22px; opacity: 0.55; }
+.notch button.page-arrow:hover { opacity: 1; }
+.notch button.page-arrow:disabled { opacity: 0.15; }
+
+@keyframes pop { from { transform: scale(1); } 40% { transform: scale(1.06); } to { transform: scale(1); } }
+.notch.pop { transform-origin: 50% 0; animation: pop 320ms ease-out; }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+.compact.fade { animation: fadein 220ms ease-out; }
+
 .notch button.panel-toggle { min-width: 30px; min-height: 30px; opacity: 0.6; }
 .notch button.panel-toggle:checked { opacity: 1; background: rgba(255,255,255,0.15); }
 

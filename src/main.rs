@@ -46,6 +46,16 @@ struct Ui {
     accent: gtk::CssProvider,
     wall: gtk::CssProvider,
     dl_bar: gtk::ProgressBar,
+    /// Open view has two pages: "home" (clock, stats, clipboard) and "media" (player).
+    pages: gtk::Stack,
+    page_prev: gtk::Button,
+    page_next: gtk::Button,
+    clock: gtk::Label,
+    date: gtk::Label,
+    no_media: gtk::Label,
+    head: gtk::Box,
+    dl_active: gtk::Box,
+    dl_recent: gtk::Box,
 }
 
 /// What the idle mascot is doing; `None` means it is hidden and the clock shows.
@@ -93,6 +103,8 @@ struct State {
     sharing: bool,
     /// Download being shown: (app name, progress 0..1).
     download: Option<(String, f64)>,
+    /// Every download in progress, by app, for the downloads page.
+    downloads: Vec<(String, f64)>,
 }
 
 type Shared = Rc<RefCell<State>>;
@@ -231,7 +243,7 @@ fn build_ui(app: &gtk::Application) {
     head.append(&text);
     head.append(&lyrics_btn);
     // Clipboard history stays behind a button so it never shows up unasked (screen sharing),
-    // and so the idle notch doesn't grow wide.
+    // and so the home page doesn't grow wide.
     let clip_btn = gtk::ToggleButton::builder()
         .icon_name("edit-paste-symbolic")
         .tooltip_text("Clipboard")
@@ -239,26 +251,38 @@ fn build_ui(app: &gtk::Application) {
         .valign(gtk::Align::Center)
         .visible(false)
         .build();
-    head.append(&clip_btn);
 
     let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 14);
     buttons.set_halign(gtk::Align::Center);
     buttons.append(&prev);
     buttons.append(&play);
     buttons.append(&next);
+    // Media page: the player, or a short note when nothing is playing.
+    let no_media = gtk::Label::builder().label("Tidak ada media yang diputar").css_classes(["no-media"]).build();
     let body = gtk::Box::new(gtk::Orientation::Vertical, 10);
-    body.set_margin_top(10);
-    // Idle extras under the big clock: system stats and recent clipboard items.
-    let stats = gtk::Label::builder().css_classes(["stats"]).build();
-    let clips = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    clips.set_width_request(260);
-    clips.set_margin_top(10);
-    clips.set_valign(gtk::Align::Start);
-    clips.set_visible(false);
     body.append(&head);
-    body.append(&stats);
     body.append(&seek_row);
     body.append(&buttons);
+    body.append(&no_media);
+
+    // Home page: big clock, date, system stats, and the clipboard button.
+    let clock = gtk::Label::builder().css_classes(["title", "clock"]).build();
+    let date = gtk::Label::builder().css_classes(["artist"]).build();
+    let stats = gtk::Label::builder().css_classes(["stats"]).build();
+    let clock_box = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    clock_box.set_hexpand(true);
+    clock_box.append(&clock);
+    clock_box.append(&date);
+    let home_head = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    home_head.append(&clock_box);
+    home_head.append(&clip_btn);
+    let home_body = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    home_body.append(&home_head);
+    home_body.append(&stats);
+    let clips = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    clips.set_width_request(260);
+    clips.set_valign(gtk::Align::Start);
+    clips.set_visible(false);
     // Full lyrics sit to the right of the player when the lyrics button is on.
     let lyrics_list = gtk::ListBox::new();
     lyrics_list.set_selection_mode(gtk::SelectionMode::None);
@@ -268,17 +292,56 @@ fn build_ui(app: &gtk::Application) {
         // min-content-width is ignored without a horizontal scrollbar, so size it directly.
         .width_request(260)
         .height_request(150)
-        .margin_top(10)
         .visible(false)
         .build();
-    let split = gtk::Box::new(gtk::Orientation::Horizontal, 16);
-    split.append(&body);
-    split.append(&lyrics_scroll);
-    split.append(&clips);
+    // Downloads page: everything in progress, then the newest files in ~/Downloads.
+    let section = |text: &str| gtk::Label::builder().label(text).css_classes(["section"]).xalign(0.0).build();
+    let dl_active = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    let dl_recent = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    let open_folder = gtk::Button::builder().label("📂  Buka folder Download").css_classes(["clip"]).build();
+    open_folder.connect_clicked(|_| {
+        let _ = gio::AppInfo::launch_default_for_uri(&gio::File::for_path(downloads_dir()).uri(), None::<&gio::AppLaunchContext>);
+    });
+    let downloads_page = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    downloads_page.set_width_request(300);
+    downloads_page.append(&section("Sedang diunduh"));
+    downloads_page.append(&dl_active);
+    downloads_page.append(&section("Terbaru di Downloads"));
+    downloads_page.append(&dl_recent);
+    downloads_page.append(&open_folder);
+    let media_page = gtk::Box::new(gtk::Orientation::Horizontal, 16);
+    media_page.append(&body);
+    media_page.append(&lyrics_scroll);
+    let home_page = gtk::Box::new(gtk::Orientation::Horizontal, 16);
+    home_page.append(&home_body);
+    home_page.append(&clips);
+    // Pages slide sideways, and the notch eases to the new page's size instead of jumping.
+    let pages = gtk::Stack::builder()
+        .transition_type(gtk::StackTransitionType::SlideLeftRight)
+        .transition_duration(220)
+        .interpolate_size(true)
+        .hhomogeneous(false)
+        .vhomogeneous(false)
+        .hexpand(true)
+        .build();
+    pages.add_named(&home_page, Some("home"));
+    pages.add_named(&media_page, Some("media"));
+    if cfg().downloads {
+        pages.add_named(&downloads_page, Some("downloads"));
+    }
+    let arrow = |icon: &str| {
+        gtk::Button::builder().icon_name(icon).css_classes(["page-arrow"]).valign(gtk::Align::Center).build()
+    };
+    let (page_prev, page_next) = (arrow("go-previous-symbolic"), arrow("go-next-symbolic"));
+    let pager = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    pager.set_margin_top(10);
+    pager.append(&page_prev);
+    pager.append(&pages);
+    pager.append(&page_next);
     let expanded = gtk::Revealer::builder()
         .transition_type(gtk::RevealerTransitionType::SlideDown)
         .transition_duration(200)
-        .child(&split)
+        .child(&pager)
         .build();
 
     let notch = gtk::Box::new(gtk::Orientation::Vertical, 2);
@@ -320,6 +383,15 @@ fn build_ui(app: &gtk::Application) {
         accent: gtk::CssProvider::new(),
         wall: gtk::CssProvider::new(),
         dl_bar,
+        pages,
+        page_prev,
+        page_next,
+        clock,
+        date,
+        no_media,
+        head,
+        dl_active,
+        dl_recent,
     };
     // Cover-tinted gradient lives in its own provider so it can be swapped per track.
     gtk::style_context_add_provider_for_display(
@@ -434,17 +506,61 @@ fn build_ui(app: &gtk::Application) {
         notch.add_controller(middle);
     }
 
-    // Hover opens, leaving closes.
+    // Read ~/Downloads only when the downloads page comes into view, not on every tick.
+    let (u, s) = (ui.clone(), state.clone());
+    ui.pages.connect_visible_child_name_notify(move |p| {
+        if p.visible_child_name().as_deref() == Some("downloads") {
+            fill_downloads_page(&u, &s.borrow());
+        }
+    });
+    // Arrows step through the pages in order.
+    for (btn, step) in [(&ui.page_prev, -1i32), (&ui.page_next, 1)] {
+        let (u, s) = (ui.clone(), state.clone());
+        btn.connect_clicked(move |_| {
+            let order = page_order();
+            let i = order.iter().position(|p| Some(*p) == u.pages.visible_child_name().as_deref()).unwrap_or(0) as i32;
+            if let Some(page) = order.get((i + step).max(0) as usize) {
+                u.pages.set_visible_child_name(page);
+            }
+            refresh_compact(&u, &s.borrow());
+        });
+    }
+
+    // Hover opens at once; leaving closes only after a short grace period. While the notch
+    // grows, the Wayland surface is resized under a still pointer and GTK reports a leave and
+    // a new enter. Closing on that leave made the notch flicker open/shut near its edges.
     let hover = gtk::EventControllerMotion::new();
-    let (u1, s1, u2, s2) = (ui.clone(), state.clone(), ui.clone(), state.clone());
+    let hover_gen = Rc::new(std::cell::Cell::new(0u32));
+    let (u1, s1, g1) = (ui.clone(), state.clone(), hover_gen.clone());
     hover.connect_enter(move |_, _, _| {
-        u1.expanded.set_reveal_child(true);
+        g1.set(g1.get() + 1);
+        if !u1.expanded.reveals_child() {
+            // Open on the page that matters right now, without a sideways slide.
+            let st = s1.borrow();
+            let page = if st.player.is_some() && !st.track.is_empty() {
+                "media"
+            } else if !st.downloads.is_empty() && cfg().downloads {
+                "downloads"
+            } else {
+                "home"
+            };
+            u1.pages.set_visible_child_full(page, gtk::StackTransitionType::None);
+            u1.expanded.set_reveal_child(true);
+        }
         refresh_compact(&u1, &s1.borrow());
     });
+    let (u2, s2) = (ui.clone(), state.clone());
     hover.connect_leave(move |_| {
-        u2.expanded.set_reveal_child(false);
-        u2.clip_btn.set_active(false);
-        refresh_compact(&u2, &s2.borrow());
+        let seq = hover_gen.get() + 1;
+        hover_gen.set(seq);
+        let (u, s, g) = (u2.clone(), s2.clone(), hover_gen.clone());
+        glib::timeout_add_local_once(Duration::from_millis(250), move || {
+            if g.get() == seq {
+                u.expanded.set_reveal_child(false);
+                u.clip_btn.set_active(false);
+                refresh_compact(&u, &s.borrow());
+            }
+        });
     });
     notch.add_controller(hover);
 
@@ -503,7 +619,7 @@ fn build_ui(app: &gtk::Application) {
     let (u, s) = (ui.clone(), state.clone());
     glib::timeout_add_seconds_local(1, move || {
         refresh_compact(&u, &s.borrow());
-        if u.stats.is_visible() && u.expanded.reveals_child() {
+        if u.stats.is_visible() && u.expanded.reveals_child() && u.pages.visible_child_name().as_deref() == Some("home") {
             let text = read_stats(&mut s.borrow_mut().cpu_prev);
             u.stats.set_label(&text);
         }
@@ -603,21 +719,33 @@ fn refresh_compact(ui: &Ui, st: &State) {
     } else {
         glib::DateTime::now_local().and_then(|d| d.format("%H:%M")).map(|s| s.to_string()).unwrap_or_default()
     };
+    // Fade new text in, except the clock ticking over to the next minute.
+    let old = ui.compact.label();
+    let is_clock = |t: &str| t.len() == 5 && t.as_bytes()[2] == b':';
+    if old != text && !(is_clock(&old) && is_clock(&text)) {
+        retrigger(&ui.compact, "fade", 250);
+    }
     ui.compact.set_label(&text);
     // Minimal mode: closed and quiet, the notch is just a thin black line. Lyrics and alerts still show.
     let open = ui.expanded.reveals_child();
     // A player that is open but stopped (no title) counts as idle, same as no player at all.
     let has_track = st.player.is_some() && !st.track.is_empty();
     let has_lyrics = has_track && !st.lyrics.is_empty();
-    let full_lyrics = open && has_lyrics && ui.lyrics_btn.is_active();
+    let page = ui.pages.visible_child_name();
+    let on_media = page.as_deref() == Some("media");
+    let full_lyrics = open && on_media && has_lyrics && ui.lyrics_btn.is_active();
     ui.lyrics_btn.set_visible(has_lyrics);
     ui.lyrics_scroll.set_visible(full_lyrics);
     ui.lyric.set_visible(st.playing && !st.lyrics.is_empty() && st.alert.is_none() && !full_lyrics);
     ui.lyric_rom.set_visible(ui.lyric.is_visible() && st.lyrics_rom.iter().any(Option::is_some));
-    ui.stats.set_visible(!has_track && cfg().stats);
+    ui.stats.set_visible(cfg().stats);
     let has_clips = ui.clips.first_child().is_some();
-    ui.clip_btn.set_visible(!has_track && has_clips);
-    ui.clips.set_visible(open && !has_track && has_clips && ui.clip_btn.is_active());
+    ui.clip_btn.set_visible(has_clips);
+    ui.clips.set_visible(open && !on_media && has_clips && ui.clip_btn.is_active());
+    let order = page_order();
+    let i = order.iter().position(|p| Some(*p) == page.as_deref()).unwrap_or(0);
+    ui.page_prev.set_sensitive(i > 0);
+    ui.page_next.set_sensitive(i + 1 < order.len());
     // Gradient source: album cover while a track is on, wallpaper when idle, else the config colors.
     let tinted = has_track && cfg().follow_cover && ui.art.paintable().is_some();
     let wall = !has_track && cfg().follow_wallpaper;
@@ -654,21 +782,34 @@ fn refresh_compact(ui: &Ui, st: &State) {
     } else {
         ui.notch.remove_css_class("thin");
     }
-    // Idle: the expanded view is a big centered clock with the date under it.
+    // Media page: the player, or the "nothing playing" note.
+    ui.head.set_visible(has_track);
     ui.buttons.set_visible(has_track);
-    let xalign = if has_track { 0.0 } else { 0.5 };
-    ui.title.set_xalign(xalign);
-    ui.artist.set_xalign(xalign);
-    if has_track {
-        ui.title.remove_css_class("clock");
-    } else {
-        let now = glib::DateTime::now_local().ok();
-        ui.title.add_css_class("clock");
-        ui.title.set_label(&now.as_ref().and_then(|d| d.format("%H:%M").ok()).unwrap_or_default());
-        ui.artist.set_label(&now.as_ref().map(tanggal).unwrap_or_default());
-        ui.art.set_visible(false);
+    ui.no_media.set_visible(!has_track);
+    if !has_track {
         ui.seek.parent().unwrap().set_visible(false);
     }
+    // Home page clock.
+    let now = glib::DateTime::now_local().ok();
+    ui.clock.set_label(&now.as_ref().and_then(|d| d.format("%H:%M").ok()).unwrap_or_default());
+    ui.date.set_label(&now.as_ref().map(tanggal).unwrap_or_default());
+}
+
+/// Pages left to right, as the arrows walk them.
+fn page_order() -> Vec<&'static str> {
+    let mut order = vec!["home", "media"];
+    if cfg().downloads {
+        order.push("downloads");
+    }
+    order
+}
+
+/// Restart a one-shot CSS animation by toggling its class.
+fn retrigger(widget: &impl IsA<gtk::Widget>, class: &'static str, ms: u64) {
+    let w = widget.as_ref().clone();
+    w.remove_css_class(class);
+    w.add_css_class(class);
+    glib::timeout_add_local_once(Duration::from_millis(ms), move || w.remove_css_class(class));
 }
 
 fn show_alert(ui: &Ui, state: &Shared, text: String) {
@@ -682,6 +823,8 @@ fn show_alert_for(ui: &Ui, state: &Shared, text: String, secs: u32) {
         st.alert_seq += 1;
         st.alert_seq
     };
+    // A small bounce draws the eye to a new alert.
+    retrigger(&ui.notch, "pop", 350);
     refresh_compact(ui, &state.borrow());
     let (u, s) = (ui.clone(), state.clone());
     glib::timeout_add_seconds_local_once(secs, move || {

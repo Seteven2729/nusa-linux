@@ -44,6 +44,10 @@ pub(crate) async fn download_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
         }
         let (progress, visible) = *e;
         let app = app_name(&uri);
+        let mut active: Vec<(String, f64)> =
+            entries.iter().filter(|(_, (_, v))| *v).map(|(u, (p, _))| (app_name(u), *p)).collect();
+        active.sort_by(|a, b| a.0.cmp(&b.0));
+        state.borrow_mut().downloads = active;
         if visible {
             // Most recently updated download wins when several run at once.
             state.borrow_mut().download = Some((app, progress));
@@ -55,11 +59,127 @@ pub(crate) async fn download_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
             }
             show_alert(&ui, &state, format!("⬇  Download selesai · {app}"));
         }
+        if ui.pages.visible_child_name().as_deref() == Some("downloads") {
+            fill_downloads_page(&ui, &state.borrow());
+        }
     }
     Ok(())
 }
 
 /// "application://org.mozilla.firefox.desktop" -> "firefox", "application://google-chrome.desktop" -> "google-chrome".
+pub(crate) fn downloads_dir() -> PathBuf {
+    glib::user_special_dir(glib::UserDirectory::Downloads).unwrap_or_else(|| glib::home_dir().join("Downloads"))
+}
+
+/// Rebuild the downloads page: a progress row per active download, then the newest files.
+pub(crate) fn fill_downloads_page(ui: &Ui, st: &State) {
+    for b in [&ui.dl_active, &ui.dl_recent] {
+        while let Some(c) = b.first_child() {
+            b.remove(&c);
+        }
+    }
+    let muted = |text: &str| gtk::Label::builder().label(text).css_classes(["time"]).xalign(0.0).build();
+    if st.downloads.is_empty() {
+        ui.dl_active.append(&muted("Tidak ada download aktif"));
+    }
+    for (app, p) in &st.downloads {
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.append(&gtk::Label::builder().label(app.as_str()).hexpand(true).xalign(0.0).build());
+        row.append(&muted(&format!("{}%", (p * 100.0).round())));
+        ui.dl_active.append(&row);
+        ui.dl_active.append(&gtk::ProgressBar::builder().fraction(*p).css_classes(["dl"]).build());
+    }
+    let files = recent_downloads(&downloads_dir(), 4);
+    if files.is_empty() {
+        ui.dl_recent.append(&muted("Folder Download kosong"));
+    }
+    let now = std::time::SystemTime::now();
+    for (path, size, modified) in files {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let age = now.duration_since(modified).unwrap_or_default().as_secs();
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.append(
+            &gtk::Label::builder()
+                .label(format!("📄  {name}"))
+                .hexpand(true)
+                .xalign(0.0)
+                .ellipsize(gtk::pango::EllipsizeMode::Middle)
+                .max_width_chars(24)
+                .build(),
+        );
+        row.append(&muted(&format!("{} · {}", human_size(size), ago(age))));
+        let btn = gtk::Button::builder().child(&row).css_classes(["clip"]).build();
+        btn.connect_clicked(move |_| {
+            let _ = gio::AppInfo::launch_default_for_uri(&gio::File::for_path(&path).uri(), None::<&gio::AppLaunchContext>);
+        });
+        ui.dl_recent.append(&btn);
+    }
+}
+
+/// Newest finished files in `dir`: (path, size, modified). Skips folders, hidden files and
+/// browsers' in-progress files.
+fn recent_downloads(dir: &std::path::Path, n: usize) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
+    let partial = [".part", ".crdownload", ".download", ".tmp"];
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            !name.starts_with('.') && !partial.iter().any(|p| name.ends_with(p))
+        })
+        .filter_map(|e| {
+            let meta = e.metadata().ok().filter(|m| m.is_file())?;
+            Some((e.path(), meta.len(), meta.modified().ok()?))
+        })
+        .collect();
+    files.sort_by(|a, b| b.2.cmp(&a.2));
+    files.truncate(n);
+    files
+}
+
+/// "2,4 MB", Indonesian decimal comma.
+fn human_size(bytes: u64) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = bytes as f64;
+    let mut u = 0;
+    while v >= 1024.0 && u + 1 < units.len() {
+        v /= 1024.0;
+        u += 1;
+    }
+    if u == 0 { format!("{bytes} B") } else { format!("{:.1} {}", v, units[u]).replace('.', ",") }
+}
+
+/// "baru saja", "5 mnt", "3 jam", "2 hari".
+fn ago(secs: u64) -> String {
+    match secs {
+        0..60 => "baru saja".into(),
+        60..3600 => format!("{} mnt", secs / 60),
+        3600..86400 => format!("{} jam", secs / 3600),
+        _ => format!("{} hari", secs / 86400),
+    }
+}
+
+#[test]
+fn download_page_formatting() {
+    assert_eq!(human_size(512), "512 B");
+    assert_eq!(human_size(2_500_000), "2,4 MB");
+    assert_eq!(ago(30), "baru saja");
+    assert_eq!(ago(300), "5 mnt");
+    assert_eq!(ago(7200), "2 jam");
+    assert_eq!(ago(200_000), "2 hari");
+
+    let dir = std::env::temp_dir().join(format!("nusa-dl-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, delay) in [("old.pdf", 0), ("movie.mkv.part", 20), ("new.zip", 20), (".hidden", 20)] {
+        std::thread::sleep(Duration::from_millis(delay));
+        std::fs::write(dir.join(name), b"x").unwrap();
+    }
+    let names: Vec<_> = recent_downloads(&dir, 4).iter().map(|f| f.0.file_name().unwrap().to_owned()).collect();
+    assert_eq!(names, ["new.zip", "old.pdf"], "newest first, partial and hidden files skipped");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 pub(crate) fn app_name(uri: &str) -> String {
     let id = uri.trim_start_matches("application://").trim_end_matches(".desktop");
     id.rsplit('.').next().unwrap_or(id).to_string()

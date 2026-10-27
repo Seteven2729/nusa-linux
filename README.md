@@ -4,7 +4,7 @@
 
 Notch kecil di tengah atas layar untuk desktop Linux berbasis Wayland. Terinspirasi dari [Nusa for Windows](https://rama2555.github.io/nusa/), ditulis ulang dari nol dengan Rust dan GTK4. Untuk pemakaian pribadi.
 
-Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya.
+Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya. Notch yang terbuka punya tiga halaman, pindah dengan panah ‹ ›: Home (jam, tanggal, statistik, clipboard), Media (player), dan Download. Saat dibuka, notch langsung ke Media kalau ada lagu, ke Download kalau ada yang sedang diunduh, dan ke Home kalau tidak keduanya.
 
 <p align="center">
   <img src="docs/screenshots/open-music.png" width="391" alt="Notch terbuka saat musik diputar: cover, judul, seek bar, tombol kontrol, dan baris lirik">
@@ -40,7 +40,7 @@ Warna notch ikut cover lagu saat musik diputar, dan ikut wallpaper saat idle. Se
 - Romanisasi lirik untuk Korea, Jepang (termasuk kanji), Mandarin (pinyin), dan Cyrillic
 - Popup charger dicolok/dicabut, Wi-Fi tersambung/putus, headphone Bluetooth tersambung beserta baterainya
 - Titik oranye saat mikrofon dipakai, hijau saat kamera menyala, merah saat layar sedang di-share
-- Progres download (browser dan aplikasi lain yang memakai Unity LauncherEntry): bar tipis di notch, lalu popup saat selesai
+- Progres download (browser dan aplikasi lain yang memakai Unity LauncherEntry): bar tipis di notch, lalu popup saat selesai. Halaman Download menampilkan semua download yang berjalan dan 4 file terbaru di folder Download (klik untuk membuka).
 - Notifikasi HP lewat KDE Connect, termasuk telepon masuk
 - Maskot mata saat idle: muncul setelah 30 detik, tertidur setelah 3 menit, tersenyum saat kamu kembali. Kalau musik sedang jalan, maskot tersenyum dan mengangguk-angguk. Kalau di-pause, matanya mengantuk.
 - Saat tidak ada lagu: jam besar, tanggal (bahasa Indonesia), dan CPU/RAM/suhu
