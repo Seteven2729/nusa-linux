@@ -5,6 +5,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 use std::path::PathBuf;
 use zbus::{proxy, Connection, MatchRule, MessageStream, ObjectPath, OwnedObjectPath, OwnedVariant};
 
+mod capture;
 mod config;
 mod dbus;
 mod style;
@@ -14,7 +15,7 @@ mod system;
 mod mascot;
 mod tray;
 
-use {config::*, dbus::*, lyrics::*, mascot::*, media::*, style::*, system::*, tray::*};
+use {capture::*, config::*, dbus::*, lyrics::*, mascot::*, media::*, style::*, system::*, tray::*};
 
 #[derive(Clone)]
 struct Ui {
@@ -37,6 +38,8 @@ struct Ui {
     lyrics_scroll: gtk::ScrolledWindow,
     lyric_rom: gtk::Label,
     mic: gtk::Label,
+    cam: gtk::Label,
+    share: gtk::Label,
     stats: gtk::Label,
     clips: gtk::Box,
     clip_btn: gtk::ToggleButton,
@@ -82,6 +85,12 @@ struct State {
     cpu_prev: Option<(u64, u64)>,
     /// Apps recording from a microphone right now.
     mic_apps: Vec<String>,
+    /// Apps holding a camera device open directly.
+    cam_apps: Vec<String>,
+    /// A camera is streaming through PipeWire.
+    cam_pw: bool,
+    /// The screen is being shared (a non-camera PipeWire video source exists).
+    sharing: bool,
     /// Download being shown: (app name, progress 0..1).
     download: Option<(String, f64)>,
 }
@@ -158,7 +167,12 @@ fn build_ui(app: &gtk::Application) {
     });
     // Orange dot while any app records from the microphone.
     let mic = gtk::Label::builder().label("●").css_classes(["mic"]).visible(false).build();
+    // Green while a camera is on, red while the screen is shared, as on phones.
+    let cam = gtk::Label::builder().label("●").css_classes(["cam"]).visible(false).build();
+    let share = gtk::Label::builder().label("●").css_classes(["share"]).visible(false).build();
     let top = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    top.append(&share);
+    top.append(&cam);
     top.append(&mic);
     top.append(&mini_art);
     top.append(&compact);
@@ -298,6 +312,8 @@ fn build_ui(app: &gtk::Application) {
         lyrics_scroll,
         lyric_rom,
         mic,
+        cam,
+        share,
         stats,
         clips,
         clip_btn,
@@ -366,6 +382,9 @@ fn build_ui(app: &gtk::Application) {
     }
     if cfg().mic {
         spawn_mic_watch(&ui, &state);
+    }
+    if cfg().camera {
+        spawn_capture_watch(&ui, &state);
     }
 
     // Gestures on the notch: wheel/two-finger up-down = volume, left-right swipe = next/previous,
@@ -612,6 +631,8 @@ fn refresh_compact(ui: &Ui, st: &State) {
     // When open, the expanded view shows either the track or a big clock, so the top row would only repeat it.
     let show_compact = st.alert.is_some() || (!open && !st.minimal);
     ui.mic.set_visible(!st.mic_apps.is_empty() && show_compact);
+    ui.cam.set_visible((!st.cam_apps.is_empty() || st.cam_pw) && show_compact);
+    ui.share.set_visible(st.sharing && show_compact);
     // The mascot stands in for the clock (or the song title) once you have been away a while.
     let mascot = st.mood != Mood::None && show_compact && st.alert.is_none() && st.download.is_none();
     ui.dl_bar.set_visible(!open && st.download.is_some());

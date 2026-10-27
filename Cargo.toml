@@ -3,6 +3,25 @@ name = "nusa-linux"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
+description = "A notch at the top of the screen for Wayland desktops: music, lyrics, alerts"
+repository = "https://github.com/Seteven2729/nusa-linux"
+
+# `cargo deb` packaging for Ubuntu/Kubuntu 26.04+ (built in CI, see .github/workflows/release.yml).
+[package.metadata.deb]
+maintainer = "Seteven2729 <79296055+Seteven2729@users.noreply.github.com>"
+section = "utils"
+# $auto reads the shared libraries the binary links (GTK4, gtk4-layer-shell, ...) via dpkg-shlibdeps.
+depends = "$auto"
+# Optional helpers: pactl (mic dot), wpctl (volume gesture), pw-dump (camera/screen-share dots), KDE Connect.
+recommends = "pulseaudio-utils, wireplumber, pipewire-bin, kdeconnect"
+extended-description = """\
+Notch at the top centre of the screen showing the playing song with synced lyrics, \
+charger/Wi-Fi/Bluetooth/download alerts, mic/camera/screen-share indicators and an \
+idle mascot. Needs a Wayland compositor with wlr-layer-shell, such as KDE Plasma."""
+assets = [
+    ["target/release/nusa-linux", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/nusa-linux/", "644"],
+]
 
 [dependencies]
 async-channel = "2.5.0"

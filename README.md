@@ -1,5 +1,7 @@
 # Nusa for Linux
 
+[![CI](https://github.com/Seteven2729/nusa-linux/actions/workflows/ci.yml/badge.svg)](https://github.com/Seteven2729/nusa-linux/actions/workflows/ci.yml)
+
 Notch kecil di tengah atas layar untuk desktop Linux berbasis Wayland. Terinspirasi dari [Nusa for Windows](https://rama2555.github.io/nusa/), ditulis ulang dari nol dengan Rust dan GTK4. Untuk pemakaian pribadi.
 
 Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya.
@@ -37,7 +39,7 @@ Warna notch ikut cover lagu saat musik diputar, dan ikut wallpaper saat idle. Se
 - Lirik tersinkron dari [lrclib.net](https://lrclib.net), satu baris di bawah judul, atau panel lirik penuh (klik baris untuk lompat)
 - Romanisasi lirik untuk Korea, Jepang (termasuk kanji), Mandarin (pinyin), dan Cyrillic
 - Popup charger dicolok/dicabut, Wi-Fi tersambung/putus, headphone Bluetooth tersambung beserta baterainya
-- Titik oranye saat ada aplikasi yang memakai mikrofon
+- Titik oranye saat mikrofon dipakai, hijau saat kamera menyala, merah saat layar sedang di-share
 - Progres download (browser dan aplikasi lain yang memakai Unity LauncherEntry): bar tipis di notch, lalu popup saat selesai
 - Notifikasi HP lewat KDE Connect, termasuk telepon masuk
 - Maskot mata saat idle: muncul setelah 30 detik, tertidur setelah 3 menit, tersenyum saat kamu kembali. Kalau musik sedang jalan, maskot tersenyum dan mengangguk-angguk. Kalau di-pause, matanya mengantuk.
@@ -79,7 +81,31 @@ Layanan berikut opsional. Kalau tidak ada, fiturnya diam dan sisanya tetap jalan
 
 Font yang dipakai Inter, dengan cadangan Noto Sans.
 
-## Install
+## Install dari release
+
+Unduh file terbaru dari halaman [Releases](https://github.com/Seteven2729/nusa-linux/releases). Tidak perlu Rust.
+
+**Kubuntu / Ubuntu 26.04 ke atas**
+
+```sh
+sudo apt install ./nusa-linux_*_amd64.deb
+nusa-linux &
+```
+
+`apt` ikut memasang GTK4 dan gtk4-layer-shell. Ubuntu 24.04 belum bisa, karena repo-nya tidak punya gtk4-layer-shell.
+
+**Arch Linux**
+
+```sh
+sudo pacman -S --needed gtk4 gtk4-layer-shell
+tar xzf nusa-linux-*-x86_64-linux.tar.gz
+install -Dm755 nusa-linux-*-x86_64-linux/nusa-linux ~/.local/bin/nusa-linux
+~/.local/bin/nusa-linux &
+```
+
+Setelah itu centang `Start with login` di menu tray (lihat bawah). Untuk cek file unduhan: `sha256sum -c SHA256SUMS --ignore-missing`.
+
+## Install dari source
 
 ### 1. Pasang Rust
 
@@ -98,7 +124,7 @@ sudo pacman -S gtk4 gtk4-layer-shell
 # Fedora
 sudo dnf install gtk4-devel gtk4-layer-shell-devel
 
-# Ubuntu 24.04+ / Debian 13+
+# Ubuntu 25.04+ / Debian 13+
 sudo apt install libgtk-4-dev libgtk4-layer-shell-dev
 ```
 
@@ -133,7 +159,7 @@ Semua setting ada di `~/.config/nusa/config.toml`, yang dibuat otomatis saat per
 
 Yang bisa diatur:
 
-- Fitur mana saja yang aktif: lirik, romanisasi, gesture, statistik, clipboard, mikrofon, notifikasi HP, download, baterai, Wi-Fi, Bluetooth
+- Fitur mana saja yang aktif: lirik, romanisasi, gesture, statistik, clipboard, mikrofon, kamera dan share layar, notifikasi HP, download, baterai, Wi-Fi, Bluetooth
 - Berapa detik idle sebelum maskot muncul dan tertidur
 - Warna gradien notch, dan apakah warnanya ikut cover lagu atau wallpaper
 
@@ -185,6 +211,12 @@ Isi clipboard hanya tampil setelah tombol clipboard diklik. Notifikasi HP muncul
 GPL-3.0-or-later, lihat [LICENSE](LICENSE). Romanisasi kanji memakai [kakasi](https://crates.io/crates/kakasi), yang berlisensi GPL-3, sehingga program ini juga GPL-3.
 
 Bacaan kanji diambil dari kamus tanpa melihat konteks kalimat, jadi kadang meleset. Beberapa kata yang paling sering muncul di lirik (君, 愛して, partikel は setelah kata ganti) dikoreksi manual.
+
+## Rilis versi baru
+
+1. Naikkan `version` di `Cargo.toml`, commit.
+2. Buat tag yang sama dan push: `git tag v0.2.0 && git push repo v0.2.0`.
+3. GitHub Actions membangun `.deb`, `.tar.gz`, dan `SHA256SUMS` lalu memasangnya di halaman Releases. Tag yang tidak cocok dengan `Cargo.toml` ditolak.
 
 ## Test
 

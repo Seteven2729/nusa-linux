@@ -19,6 +19,7 @@ gestures = true     # scroll = volume, swipe = next/previous, middle click = pla
 stats = true        # CPU/RAM/temperature in the idle view
 clipboard = true    # clipboard button in the idle view (Klipper)
 mic = true          # orange dot while an app records from a microphone
+camera = true       # green dot while a camera is on, red dot while the screen is shared
 phone = true        # phone notifications via KDE Connect
 downloads = true    # download progress bar
 battery = true      # charger plugged/unplugged alerts
@@ -45,6 +46,7 @@ pub(crate) struct Config {
     pub(crate) stats: bool,
     pub(crate) clipboard: bool,
     pub(crate) mic: bool,
+    pub(crate) camera: bool,
     pub(crate) phone: bool,
     pub(crate) downloads: bool,
     pub(crate) battery: bool,
@@ -119,6 +121,7 @@ fn parse_config(text: &str) -> Config {
         stats: flag("features", "stats"),
         clipboard: flag("features", "clipboard"),
         mic: flag("features", "mic"),
+        camera: flag("features", "camera"),
         phone: flag("features", "phone"),
         downloads: flag("features", "downloads"),
         battery: flag("features", "battery"),

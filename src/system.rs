@@ -269,14 +269,18 @@ pub(crate) async fn phone_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
 
 /// Watches PipeWire through `pactl subscribe` and reports which apps record from a mic.
 /// ponytail: shells out to pactl instead of linking libpulse/pipewire; swap if pactl ever goes missing.
-/// PID of the running `pactl subscribe`, so Reload can stop and reap it before exec.
-/// (After exec the new program wouldn't know about it, leaving a zombie behind.)
-static MIC_WATCHER: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+/// PIDs of long-running helper processes (`pactl subscribe`, `pw-dump --monitor`), so Reload
+/// can stop and reap them before exec. After exec the new program wouldn't know about them,
+/// leaving zombies behind.
+static WATCHERS: std::sync::Mutex<Vec<i32>> = std::sync::Mutex::new(Vec::new());
 
-pub(crate) fn stop_mic_watch() {
-    let pid = MIC_WATCHER.swap(0, std::sync::atomic::Ordering::Relaxed);
-    if pid > 0 {
-        // SAFETY: plain syscalls on a child PID we spawned and never waited on elsewhere.
+pub(crate) fn register_watcher(pid: i32) {
+    WATCHERS.lock().unwrap().push(pid);
+}
+
+pub(crate) fn stop_watchers() {
+    for pid in WATCHERS.lock().unwrap().drain(..) {
+        // SAFETY: plain syscalls on child PIDs we spawned and never waited on elsewhere.
         unsafe {
             libc::kill(pid, libc::SIGTERM);
             libc::waitpid(pid, std::ptr::null_mut(), 0);
@@ -317,7 +321,7 @@ pub(crate) fn spawn_mic_watch(ui: &Ui, state: &Shared) {
             });
         }
         let Ok(mut child) = cmd.spawn() else { return };
-        MIC_WATCHER.store(child.id() as i32, std::sync::atomic::Ordering::Relaxed);
+        register_watcher(child.id() as i32);
         for line in std::io::BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok) {
             if line.contains("source-output") {
                 let now = recording();

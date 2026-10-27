@@ -1,0 +1,56 @@
+name: Release
+
+# Push a tag like v0.1.0 to build and publish a release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Built on Ubuntu 26.04: the .deb's dependencies come from its repos, and the same
+    # binary runs on Arch (glibc and GTK there are newer).
+    container: ubuntu:26.04
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq curl ca-certificates git build-essential pkg-config dpkg-dev libgtk-4-dev libgtk4-layer-shell-dev
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Tag must match Cargo.toml version
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+
+      - run: cargo build --release --locked
+      - run: cargo test --release --locked
+
+      - name: Package .deb
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb --no-build
+          cp target/debian/*.deb .
+
+      - name: Package tarball
+        run: |
+          name="nusa-linux-${GITHUB_REF_NAME}-x86_64-linux"
+          mkdir "$name"
+          cp target/release/nusa-linux README.md LICENSE "$name/"
+          tar czf "$name.tar.gz" "$name"
+          sha256sum *.deb *.tar.gz > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.deb
+            *.tar.gz
+            SHA256SUMS
+          generate_release_notes: true

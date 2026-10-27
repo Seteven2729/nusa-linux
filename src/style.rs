@@ -46,6 +46,8 @@ progressbar.dl progress { min-height: 3px; border-radius: 2px; background: #8fd8
 .lrc.now { opacity: 1; font-weight: 700; }
 .rom { font-size: 11px; opacity: 0.6; }
 .mic { color: #ff9f0a; font-size: 10px; }
+.cam { color: #30d158; font-size: 10px; }
+.share { color: #ff453a; font-size: 10px; }
 .stats { font-size: 11px; color: #b9cdf5; font-feature-settings: 'tnum'; }
 .notch button.clip { min-height: 26px; padding: 0 10px; border-radius: 8px; background: rgba(255,255,255,0.06); font-size: 12px; }
 .notch button.clip:hover { background: rgba(255,255,255,0.14); }

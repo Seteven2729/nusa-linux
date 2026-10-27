@@ -175,7 +175,7 @@ pub(crate) fn spawn_tray(app: &gtk::Application, ui: &Ui, state: &Shared) {
                 // exec keeps the PID, so a systemd service doesn't see it as an exit.
                 TrayMsg::Reload => {
                     use std::os::unix::process::CommandExt;
-                    stop_mic_watch();
+                    stop_watchers();
                     let err = std::process::Command::new(std::env::current_exe().unwrap_or_default()).exec();
                     show_alert(&ui, &state, format!("Reload gagal: {err}"));
                 }
