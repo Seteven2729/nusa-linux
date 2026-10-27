@@ -4,6 +4,32 @@ Notch kecil di tengah atas layar untuk desktop Linux berbasis Wayland. Terinspir
 
 Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya.
 
+<p align="center">
+  <img src="docs/screenshots/open-music.png" width="391" alt="Notch terbuka saat musik diputar: cover, judul, seek bar, tombol kontrol, dan baris lirik">
+</p>
+
+## Tampilan
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/closed-music.png" width="320" alt="Notch tertutup saat musik diputar"><br>Tertutup saat musik diputar: lirik dan romanisasinya</td>
+    <td align="center"><img src="docs/screenshots/idle.png" width="260" alt="Tampilan idle dengan jam, tanggal, dan statistik"><br>Idle: jam, tanggal, CPU/RAM/suhu</td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/screenshots/lyrics.png" width="600" alt="Panel lirik penuh dengan romanisasi"><br>Panel lirik penuh. Baris yang sedang dinyanyikan menyala, klik baris lain untuk lompat.</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/clipboard.png" width="420" alt="Panel clipboard"><br>Clipboard, terbuka hanya setelah tombolnya diklik</td>
+    <td align="center"><img src="docs/screenshots/mascot.png" width="240" alt="Maskot mata"><br>Maskot muncul saat kamu idle</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/alert.png" width="300" alt="Popup notifikasi HP"><br>Notifikasi HP lewat KDE Connect</td>
+    <td align="center"><img src="docs/screenshots/download.png" width="240" alt="Progres download dan titik mikrofon"><br>Progres download, titik oranye = mikrofon dipakai</td>
+  </tr>
+</table>
+
+Warna notch ikut cover lagu saat musik diputar, dan ikut wallpaper saat idle. Semua isi di screenshot adalah data contoh.
+
 ## Fitur
 
 - Lagu yang sedang diputar dari player MPRIS mana pun (Spotify, Strawberry, browser, mpv): cover, judul, artis, prev/play/next, seek bar
