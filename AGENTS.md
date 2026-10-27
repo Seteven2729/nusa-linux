@@ -15,5 +15,20 @@ The user runs Nusa all day as the systemd user service `nusa-linux.service` and 
 ## Commits and releases
 
 - Commits use the repo's configured noreply email and end with the message body, with no attribution trailer.
+- Never add a `Co-Authored-By` line to commits, and never push a commit that has one.
 - Push to the `repo` remote.
 - Release steps: README, section "Rilis versi baru". CI commits the PKGBUILD bump after each release, so `git pull` before the next commit.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for Seteven2729/nusa-linux, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one root `GLOSSARY.md` plus `docs/adr/`. See `docs/agents/domain.md`.
