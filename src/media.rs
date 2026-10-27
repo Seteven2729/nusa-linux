@@ -17,13 +17,26 @@ pub(crate) async fn mpris_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
         .await?
         .filter(|s| std::future::ready(s.args().is_ok_and(|a| a.name().starts_with("org.mpris.MediaPlayer2."))))
         .map(|_| ());
-    let mut events = futures_util::stream::select(props, owners);
+    // The player switch button asks for a re-pick through this channel.
+    let (repick_tx, repick_rx) = async_channel::unbounded::<()>();
+    state.borrow_mut().repick = Some(repick_tx);
+    // async_channel's Receiver isn't Unpin, so pin the merged stream to poll it.
+    let mut events = std::pin::pin!(futures_util::stream::select(futures_util::stream::select(props, owners), repick_rx));
 
     // Re-pick from every live player on each event instead of tracking incrementally,
     // so closed players and failed calls can never leave a stale choice behind.
     loop {
         let current = state.borrow().player.as_ref().map(|p| p.inner().destination().to_string());
-        let picked = pick_player(&conn, &dbus, current.as_deref()).await;
+        let pinned = state.borrow().pinned.clone();
+        let (picked, players) = pick_player(&conn, &dbus, current.as_deref(), pinned.as_deref()).await;
+        {
+            let mut st = state.borrow_mut();
+            // A pinned player that closed releases the pin; picking goes back to automatic.
+            if st.pinned.as_ref().is_some_and(|p| !players.iter().any(|(o, _)| o == p)) {
+                st.pinned = None;
+            }
+            st.players = players;
+        }
         if picked.is_none() {
             clear_player(&ui, &state);
         } else {
@@ -37,25 +50,38 @@ pub(crate) async fn mpris_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
 }
 
 /// Current player if still playing, else any playing one, else current if alive, else any.
-pub(crate) async fn pick_player(conn: &Connection, dbus: &zbus::fdo::DBusProxy<'_>, current: Option<&str>) -> Option<PlayerProxy<'static>> {
+/// Every live player as (bus owner, display name), plus the one to show: the pinned one if
+/// alive, else current if still playing, else any playing one, else current, else any.
+pub(crate) async fn pick_player(
+    conn: &Connection,
+    dbus: &zbus::fdo::DBusProxy<'_>,
+    current: Option<&str>,
+    pinned: Option<&str>,
+) -> (Option<PlayerProxy<'static>>, Vec<(String, String)>) {
     let mut alive = vec![];
-    for name in dbus.list_names().await.ok()? {
-        if !name.starts_with("org.mpris.MediaPlayer2.") {
-            continue;
-        }
+    for name in dbus.list_names().await.unwrap_or_default() {
+        let Some(suffix) = name.strip_prefix("org.mpris.MediaPlayer2.") else { continue };
         let Ok(owner) = dbus.get_name_owner(name.as_ref()).await else { continue };
         let Ok(p) = player(conn, owner.to_string()).await else { continue };
         let Ok(status) = p.playback_status().await else { continue };
-        alive.push((owner.to_string(), status == "Playing", p));
+        let identity = match MediaPlayerProxy::builder(conn).destination(owner.to_string()).build().await {
+            Ok(mp) => mp.identity().await.ok(),
+            Err(_) => None,
+        };
+        // "firefox.instance_1_23" -> "firefox" when the player has no Identity.
+        let label = identity.unwrap_or_else(|| suffix.split('.').next().unwrap_or(suffix).to_owned());
+        alive.push((owner.to_string(), label, status == "Playing", p));
     }
-    let is_current = |o: &str| Some(o) == current;
+    let is = |o: &str, want: Option<&str>| Some(o) == want;
     let idx = alive
         .iter()
-        .position(|(o, playing, _)| *playing && is_current(o))
-        .or_else(|| alive.iter().position(|(_, playing, _)| *playing))
-        .or_else(|| alive.iter().position(|(o, _, _)| is_current(o)))
-        .or((!alive.is_empty()).then_some(0))?;
-    Some(alive.swap_remove(idx).2)
+        .position(|(o, ..)| is(o, pinned))
+        .or_else(|| alive.iter().position(|(o, _, playing, _)| *playing && is(o, current)))
+        .or_else(|| alive.iter().position(|(_, _, playing, _)| *playing))
+        .or_else(|| alive.iter().position(|(o, ..)| is(o, current)))
+        .or((!alive.is_empty()).then_some(0));
+    let players = alive.iter().map(|(o, l, ..)| (o.clone(), l.clone())).collect();
+    (idx.map(|i| alive.swap_remove(i).3), players)
 }
 
 /// Forget the current player and its track, leaving everything else (alerts, mic, settings, mascot) alone.

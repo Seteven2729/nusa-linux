@@ -2,6 +2,12 @@
 
 use crate::*;
 
+#[proxy(interface = "org.mpris.MediaPlayer2", default_path = "/org/mpris/MediaPlayer2")]
+pub(crate) trait MediaPlayer {
+    #[zbus(property)]
+    fn identity(&self) -> zbus::Result<String>;
+}
+
 #[proxy(interface = "org.mpris.MediaPlayer2.Player", default_path = "/org/mpris/MediaPlayer2")]
 pub(crate) trait Player {
     fn play_pause(&self) -> zbus::Result<()>;

@@ -4,7 +4,7 @@
 
 Notch kecil di tengah atas layar untuk desktop Linux berbasis Wayland. Terinspirasi dari [Nusa for Windows](https://rama2555.github.io/nusa/), ditulis ulang dari nol dengan Rust dan GTK4. Untuk pemakaian pribadi.
 
-Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya. Notch yang terbuka punya tiga halaman, pindah dengan panah ‹ ›: Home (jam, tanggal, statistik, clipboard), Media (player), dan Download. Saat dibuka, notch langsung ke Media kalau ada lagu, ke Download kalau ada yang sedang diunduh, dan ke Home kalau tidak keduanya.
+Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya. Notch yang terbuka punya empat halaman, pindah dengan panah ‹ ›: Home (jam, tanggal, statistik, clipboard), Media (player), Mixer (volume per aplikasi), dan Download. Saat dibuka, notch langsung ke Media kalau ada lagu, ke Download kalau ada yang sedang diunduh, dan ke Home kalau tidak keduanya.
 
 <p align="center">
   <img src="docs/screenshots/open-music.png" width="391" alt="Notch terbuka saat musik diputar: cover, judul, seek bar, tombol kontrol, dan baris lirik">
@@ -48,7 +48,10 @@ Warna notch ikut cover lagu saat musik diputar, dan ikut wallpaper saat idle. Se
 - Maskot mata saat idle: muncul setelah 30 detik, tertidur setelah 3 menit, tersenyum saat kamu kembali. Kalau musik sedang jalan, maskot tersenyum dan mengangguk-angguk. Kalau di-pause, matanya mengantuk.
 - Saat tidak ada lagu: jam besar, tanggal (bahasa Indonesia), dan CPU/RAM/suhu
 - Tombol clipboard di tampilan idle: membuka 3 isi clipboard terakhir (klik untuk copy ulang). Panel tertutup lagi setiap notch ditutup.
-- Menu tray: start with login, minimal notch (garis tipis), maskot, edit settings, reload, exit
+- Halaman Mixer: volume output dan slider plus tombol bisu untuk setiap aplikasi yang sedang memutar suara
+- Kalau ada lebih dari satu player (misalnya Strawberry dan browser), tombol `⇄` di halaman Media memilih player yang dikontrol. Pilihan itu bertahan sampai player-nya ditutup.
+- Tema warna (`nusa`, `midnight`, `rose`, `forest`, atau `custom`) dan bahasa tampilan (Indonesia atau Inggris)
+- Menu tray: start with login, minimal notch (garis tipis), maskot, tema, edit settings, reload, exit
 - Hidup lagi sendiri kalau crash (systemd user service)
 
 ## Gesture
@@ -172,9 +175,10 @@ Semua setting ada di `~/.config/nusa/config.toml`, yang dibuat otomatis saat per
 
 Yang bisa diatur:
 
-- Fitur mana saja yang aktif: lirik, romanisasi, gesture, statistik, clipboard, mikrofon, kamera dan share layar, notifikasi HP, download, baterai, Wi-Fi, Bluetooth
+- Bahasa tampilan: `language = "id"` atau `"en"`
+- Fitur mana saja yang aktif: lirik, romanisasi, gesture, statistik, clipboard, mikrofon, kamera dan share layar, mixer, notifikasi HP, download, baterai, Wi-Fi, Bluetooth
 - Berapa detik idle sebelum maskot muncul dan tertidur
-- Warna gradien notch, dan apakah warnanya ikut cover lagu atau wallpaper
+- Tema warna (`theme`), yang juga bisa dipilih dari menu tray, Tema, dan langsung berlaku tanpa reload. Atau gradien sendiri dengan `theme = "custom"`, dan apakah warnanya ikut cover lagu atau wallpaper. Selama `follow_cover`/`follow_wallpaper` aktif, warna cover/wallpaper menimpa tema; matikan keduanya untuk melihat warna tema terus.
 
 Nilai yang salah atau hilang memakai default, jadi file yang rusak tidak membuat Nusa gagal jalan.
 

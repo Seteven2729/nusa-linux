@@ -57,7 +57,7 @@ pub(crate) async fn download_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
             if showing {
                 state.borrow_mut().download = None;
             }
-            show_alert(&ui, &state, format!("⬇  Download selesai · {app}"));
+            show_alert(&ui, &state, format!("{} · {app}", tr("⬇  Download selesai", "⬇  Download finished")));
         }
         if ui.pages.visible_child_name().as_deref() == Some("downloads") {
             fill_downloads_page(&ui, &state.borrow());
@@ -80,7 +80,7 @@ pub(crate) fn fill_downloads_page(ui: &Ui, st: &State) {
     }
     let muted = |text: &str| gtk::Label::builder().label(text).css_classes(["time"]).xalign(0.0).build();
     if st.downloads.is_empty() {
-        ui.dl_active.append(&muted("Tidak ada download aktif"));
+        ui.dl_active.append(&muted(tr("Tidak ada download aktif", "No active downloads")));
     }
     for (app, p) in &st.downloads {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -91,7 +91,7 @@ pub(crate) fn fill_downloads_page(ui: &Ui, st: &State) {
     }
     let files = recent_downloads(&downloads_dir(), 4);
     if files.is_empty() {
-        ui.dl_recent.append(&muted("Folder Download kosong"));
+        ui.dl_recent.append(&muted(tr("Folder Download kosong", "Downloads folder is empty")));
     }
     let now = std::time::SystemTime::now();
     for (path, size, modified) in files {
@@ -107,7 +107,7 @@ pub(crate) fn fill_downloads_page(ui: &Ui, st: &State) {
                 .max_width_chars(24)
                 .build(),
         );
-        row.append(&muted(&format!("{} · {}", human_size(size), ago(age))));
+        row.append(&muted(&format!("{} · {}", human_size(size, cfg().english), ago(age, cfg().english))));
         let btn = gtk::Button::builder().child(&row).css_classes(["clip"]).build();
         btn.connect_clicked(move |_| {
             let _ = gio::AppInfo::launch_default_for_uri(&gio::File::for_path(&path).uri(), None::<&gio::AppLaunchContext>);
@@ -138,8 +138,8 @@ fn recent_downloads(dir: &std::path::Path, n: usize) -> Vec<(PathBuf, u64, std::
     files
 }
 
-/// "2,4 MB", Indonesian decimal comma.
-fn human_size(bytes: u64) -> String {
+/// "2,4 MB" (Indonesian decimal comma) or "2.4 MB".
+fn human_size(bytes: u64, english: bool) -> String {
     let units = ["B", "KB", "MB", "GB", "TB"];
     let mut v = bytes as f64;
     let mut u = 0;
@@ -147,27 +147,31 @@ fn human_size(bytes: u64) -> String {
         v /= 1024.0;
         u += 1;
     }
-    if u == 0 { format!("{bytes} B") } else { format!("{:.1} {}", v, units[u]).replace('.', ",") }
+    let s = if u == 0 { format!("{bytes} B") } else { format!("{:.1} {}", v, units[u]) };
+    if english { s } else { s.replace('.', ",") }
 }
 
-/// "baru saja", "5 mnt", "3 jam", "2 hari".
-fn ago(secs: u64) -> String {
+/// "baru saja", "5 mnt", "3 jam", "2 hari" (or "just now", "5 min", "3 h", "2 d").
+fn ago(secs: u64, english: bool) -> String {
+    let (now, min, hour, day) = if english { ("just now", "min", "h", "d") } else { ("baru saja", "mnt", "jam", "hari") };
     match secs {
-        0..60 => "baru saja".into(),
-        60..3600 => format!("{} mnt", secs / 60),
-        3600..86400 => format!("{} jam", secs / 3600),
-        _ => format!("{} hari", secs / 86400),
+        0..60 => now.into(),
+        60..3600 => format!("{} {min}", secs / 60),
+        3600..86400 => format!("{} {hour}", secs / 3600),
+        _ => format!("{} {day}", secs / 86400),
     }
 }
 
 #[test]
 fn download_page_formatting() {
-    assert_eq!(human_size(512), "512 B");
-    assert_eq!(human_size(2_500_000), "2,4 MB");
-    assert_eq!(ago(30), "baru saja");
-    assert_eq!(ago(300), "5 mnt");
-    assert_eq!(ago(7200), "2 jam");
-    assert_eq!(ago(200_000), "2 hari");
+    assert_eq!(human_size(512, false), "512 B");
+    assert_eq!(human_size(2_500_000, false), "2,4 MB");
+    assert_eq!(human_size(2_500_000, true), "2.4 MB");
+    assert_eq!(ago(30, false), "baru saja");
+    assert_eq!(ago(300, false), "5 mnt");
+    assert_eq!(ago(7200, false), "2 jam");
+    assert_eq!(ago(200_000, false), "2 hari");
+    assert_eq!(ago(300, true), "5 min");
 
     let dir = std::env::temp_dir().join(format!("nusa-dl-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -197,9 +201,9 @@ pub(crate) async fn battery_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
         let pct = bat.percentage().await.unwrap_or(0.0).round();
         // UPower states: 1 charging, 2 discharging, 4 fully charged.
         let text = match c.get().await? {
-            1 => format!("⚡ Charging  {pct}%"),
-            2 => format!("🔋 On battery  {pct}%"),
-            4 => "⚡ Fully charged".into(),
+            1 => format!("{}  {pct}%", tr("⚡ Mengisi daya", "⚡ Charging")),
+            2 => format!("{}  {pct}%", tr("🔋 Pakai baterai", "🔋 On battery")),
+            4 => tr("⚡ Baterai penuh", "⚡ Fully charged").into(),
             _ => continue,
         };
         show_alert(&ui, &state, text);
@@ -222,10 +226,10 @@ pub(crate) async fn network_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
             let active = ActiveConnectionProxy::builder(&conn).path(path).build().await?;
             let name = active.id().await.unwrap_or_default();
             let icon = if active.kind().await.as_deref() == Ok("802-11-wireless") { "📶" } else { "🔌" };
-            show_alert(&ui, &state, format!("{icon}  Terhubung · {name}"));
+            show_alert(&ui, &state, format!("{icon}  {} · {name}", tr("Terhubung", "Connected")));
         } else if now <= 20 && online {
             online = false;
-            show_alert(&ui, &state, "⚠  Internet terputus".into());
+            show_alert(&ui, &state, tr("⚠  Internet terputus", "⚠  Internet disconnected").into());
         }
     }
     Ok(())
@@ -252,7 +256,7 @@ pub(crate) async fn bluetooth_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
         }
         let name = dev.alias().await.unwrap_or_default();
         if !connected {
-            show_alert(&ui, &state, format!("🎧  {name} terputus"));
+            show_alert(&ui, &state, format!("🎧  {name} {}", tr("terputus", "disconnected")));
             continue;
         }
         show_alert(&ui, &state, format!("🎧  {name}"));
@@ -459,7 +463,7 @@ pub(crate) fn spawn_mic_watch(ui: &Ui, state: &Shared) {
             let name = apps.join(", ");
             state.borrow_mut().mic_apps = apps;
             if started {
-                show_alert(&ui, &state, format!("🎙  Mic dipakai · {name}"));
+                show_alert(&ui, &state, format!("{} · {name}", tr("🎙  Mic dipakai", "🎙  Mic in use")));
             } else {
                 refresh_compact(&ui, &state.borrow());
             }

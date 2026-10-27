@@ -13,9 +13,10 @@ mod media;
 mod lyrics;
 mod system;
 mod mascot;
+mod mixer;
 mod tray;
 
-use {capture::*, config::*, dbus::*, lyrics::*, mascot::*, media::*, style::*, system::*, tray::*};
+use {capture::*, config::*, dbus::*, lyrics::*, mascot::*, media::*, mixer::*, style::*, system::*, tray::*};
 
 #[derive(Clone)]
 struct Ui {
@@ -56,8 +57,12 @@ struct Ui {
     head: gtk::Box,
     dl_active: gtk::Box,
     dl_recent: gtk::Box,
+    player_btn: gtk::Button,
+    mixer_box: gtk::Box,
     pager: gtk::Box,
     top_row: gtk::Revealer,
+    /// The themed stylesheet; reloaded when a theme is picked from the tray.
+    css: gtk::CssProvider,
     /// Holds the notch's min-width while opening/closing; empty means the stylesheet default.
     width_css: gtk::CssProvider,
     /// Hover wants the notch open (true even during the widen-first phase).
@@ -111,6 +116,12 @@ struct State {
     sharing: bool,
     /// Download being shown: (app name, progress 0..1).
     download: Option<(String, f64)>,
+    /// Every open MPRIS player as (bus owner, display name).
+    players: Vec<(String, String)>,
+    /// Player chosen with the switch button; kept until it closes.
+    pinned: Option<String>,
+    /// Asks the MPRIS loop to pick again (after the switch button changes `pinned`).
+    repick: Option<async_channel::Sender<()>>,
     /// Every download in progress, by app, for the downloads page.
     downloads: Vec<(String, f64)>,
 }
@@ -129,8 +140,7 @@ fn build_ui(app: &gtk::Application) {
         return;
     }
     let css = gtk::CssProvider::new();
-    let [c1, c2, c3] = &cfg().gradient;
-    css.load_from_string(&CSS.replace("#020510 0%, #061338 65%, #0c225c 100%", &format!("{c1} 0%, {c2} 65%, {c3} 100%")));
+    css.load_from_string(&themed_css(cfg()));
     gtk::style_context_add_provider_for_display(
         &gtk::gdk::Display::default().unwrap(),
         &css,
@@ -242,7 +252,7 @@ fn build_ui(app: &gtk::Application) {
     text.append(&artist);
     let lyrics_btn = gtk::ToggleButton::builder()
         .icon_name("format-justify-left-symbolic")
-        .tooltip_text("Lirik")
+        .tooltip_text(tr("Lirik", "Lyrics"))
         .css_classes(["panel-toggle"])
         .valign(gtk::Align::Center)
         .build();
@@ -266,8 +276,11 @@ fn build_ui(app: &gtk::Application) {
     buttons.append(&play);
     buttons.append(&next);
     // Media page: the player, or a short note when nothing is playing.
-    let no_media = gtk::Label::builder().label("Tidak ada media yang diputar").css_classes(["no-media"]).build();
+    let no_media = gtk::Label::builder().label(tr("Tidak ada media yang diputar", "Nothing playing")).css_classes(["no-media"]).build();
+    // Shown when more than one player is open; cycles which one the notch controls.
+    let player_btn = gtk::Button::builder().css_classes(["player-switch"]).halign(gtk::Align::Center).visible(false).build();
     let body = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    body.append(&player_btn);
     body.append(&head);
     body.append(&seek_row);
     body.append(&buttons);
@@ -306,15 +319,15 @@ fn build_ui(app: &gtk::Application) {
     let section = |text: &str| gtk::Label::builder().label(text).css_classes(["section"]).xalign(0.0).build();
     let dl_active = gtk::Box::new(gtk::Orientation::Vertical, 6);
     let dl_recent = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    let open_folder = gtk::Button::builder().label("📂  Buka folder Download").css_classes(["clip"]).build();
+    let open_folder = gtk::Button::builder().label(tr("📂  Buka folder Download", "📂  Open Downloads folder")).css_classes(["clip"]).build();
     open_folder.connect_clicked(|_| {
         let _ = gio::AppInfo::launch_default_for_uri(&gio::File::for_path(downloads_dir()).uri(), None::<&gio::AppLaunchContext>);
     });
     let downloads_page = gtk::Box::new(gtk::Orientation::Vertical, 8);
     downloads_page.set_width_request(300);
-    downloads_page.append(&section("Sedang diunduh"));
+    downloads_page.append(&section(tr("Sedang diunduh", "Downloading")));
     downloads_page.append(&dl_active);
-    downloads_page.append(&section("Terbaru di Downloads"));
+    downloads_page.append(&section(tr("Terbaru di Downloads", "Latest in Downloads")));
     downloads_page.append(&dl_recent);
     downloads_page.append(&open_folder);
     let media_page = gtk::Box::new(gtk::Orientation::Horizontal, 16);
@@ -334,6 +347,12 @@ fn build_ui(app: &gtk::Application) {
         .build();
     pages.add_named(&home_page, Some("home"));
     pages.add_named(&media_page, Some("media"));
+    // Mixer page: output volume and per-app sliders, filled when shown (see mixer.rs).
+    let mixer_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    mixer_box.set_width_request(340);
+    if cfg().mixer {
+        pages.add_named(&mixer_box, Some("mixer"));
+    }
     if cfg().downloads {
         pages.add_named(&downloads_page, Some("downloads"));
     }
@@ -408,8 +427,11 @@ fn build_ui(app: &gtk::Application) {
         head,
         dl_active,
         dl_recent,
+        player_btn,
+        mixer_box,
         pager,
         top_row,
+        css: css.clone(),
         width_css: gtk::CssProvider::new(),
         want_open: Default::default(),
         anim: Default::default(),
@@ -495,6 +517,9 @@ fn build_ui(app: &gtk::Application) {
     if cfg().camera {
         spawn_capture_watch(&ui, &state);
     }
+    if cfg().mixer {
+        spawn_mixer_watch(&ui);
+    }
 
     // Gestures on the notch: wheel/two-finger up-down = volume, left-right swipe = next/previous,
     // middle click = play/pause. Inner scrollables (lyrics, seek bar) handle their own scroll first.
@@ -546,8 +571,23 @@ fn build_ui(app: &gtk::Application) {
     // Read ~/Downloads only when the downloads page comes into view, not on every tick.
     let (u, s) = (ui.clone(), state.clone());
     ui.pages.connect_visible_child_name_notify(move |p| {
-        if p.visible_child_name().as_deref() == Some("downloads") {
-            fill_downloads_page(&u, &s.borrow());
+        match p.visible_child_name().as_deref() {
+            Some("downloads") => fill_downloads_page(&u, &s.borrow()),
+            Some("mixer") => fill_mixer_page(&u),
+            _ => {}
+        }
+    });
+    // Switch to the next open player and keep it until it closes.
+    let s = state.clone();
+    ui.player_btn.connect_clicked(move |_| {
+        let mut st = s.borrow_mut();
+        let current = st.player.as_ref().map(|p| p.inner().destination().to_string());
+        let i = st.players.iter().position(|(o, _)| Some(o) == current.as_ref()).map_or(0, |i| i + 1);
+        if let Some((owner, _)) = st.players.get(i % st.players.len().max(1)).cloned() {
+            st.pinned = Some(owner);
+            if let Some(tx) = &st.repick {
+                let _ = tx.try_send(());
+            }
         }
     });
     // Arrows step through the pages in order.
@@ -821,6 +861,11 @@ fn refresh_compact(ui: &Ui, st: &State) {
     } else {
         ui.notch.remove_css_class("thin");
     }
+    // Player switch: name of the one in control, only when there is a choice.
+    let current = st.player.as_ref().map(|p| p.inner().destination().to_string());
+    let name = st.players.iter().find(|(o, _)| Some(o) == current.as_ref()).map(|(_, n)| n.as_str()).unwrap_or("");
+    ui.player_btn.set_visible(st.players.len() > 1);
+    ui.player_btn.set_label(&format!("{name}  ⇄"));
     // Media page: the player, or the "nothing playing" note.
     ui.head.set_visible(has_track);
     ui.buttons.set_visible(has_track);
@@ -875,6 +920,9 @@ fn set_open(ui: &Ui, state: &Shared, open: bool) {
 /// Pages left to right, as the arrows walk them.
 fn page_order() -> Vec<&'static str> {
     let mut order = vec!["home", "media"];
+    if cfg().mixer {
+        order.push("mixer");
+    }
     if cfg().downloads {
         order.push("downloads");
     }
@@ -915,10 +963,18 @@ fn show_alert_for(ui: &Ui, state: &Shared, text: String, secs: u32) {
 const HARI: [&str; 7] = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"];
 const BULAN: [&str; 12] =
     ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+const DAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const MONTHS: [&str; 12] =
+    ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-/// "Senin, 26 Oktober 2026", independent of the system locale.
+/// "Senin, 26 Oktober 2026" or "Monday, 26 October 2026", independent of the system locale.
 fn tanggal(d: &glib::DateTime) -> String {
-    let (day, month) = (HARI[d.day_of_week() as usize - 1], BULAN[d.month() as usize - 1]);
+    format_date(d, cfg().english)
+}
+
+fn format_date(d: &glib::DateTime, english: bool) -> String {
+    let (days, months) = if english { (DAYS, MONTHS) } else { (HARI, BULAN) };
+    let (day, month) = (days[d.day_of_week() as usize - 1], months[d.month() as usize - 1]);
     format!("{day}, {} {month} {}", d.day_of_month(), d.year())
 }
 
@@ -938,7 +994,8 @@ fn mmss(secs: i64) -> String {
 #[test]
 fn tanggal_indonesia() {
     let d = glib::DateTime::from_local(2026, 10, 26, 9, 0, 0.0).unwrap();
-    assert_eq!(tanggal(&d), "Senin, 26 Oktober 2026");
+    assert_eq!(format_date(&d, false), "Senin, 26 Oktober 2026");
+    assert_eq!(format_date(&d, true), "Monday, 26 October 2026");
     let d = glib::DateTime::from_local(2026, 2, 1, 9, 0, 0.0).unwrap();
-    assert_eq!(tanggal(&d), "Minggu, 1 Februari 2026");
+    assert_eq!(format_date(&d, false), "Minggu, 1 Februari 2026");
 }

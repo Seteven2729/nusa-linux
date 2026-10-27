@@ -7,6 +7,9 @@ use std::sync::OnceLock;
 /// Written on first run. Every key is optional; anything missing or invalid falls back to the default.
 const TEMPLATE: &str = r##"# Nusa settings. After editing, choose "Reload" in the Nusa tray menu.
 
+# Language of the notch and tray menu: "id" (Bahasa Indonesia) or "en" (English).
+language = "id"
+
 # Closed notch is a thin line until something happens. Also toggled from the tray.
 minimal = false
 # Eyes that appear when you're idle. Also toggled from the tray.
@@ -19,6 +22,7 @@ gestures = true     # scroll = volume, swipe = next/previous, middle click = pla
 stats = true        # CPU/RAM/temperature in the idle view
 clipboard = true    # clipboard button in the idle view (Klipper)
 mic = true          # orange dot while an app records from a microphone
+mixer = true        # volume mixer page: output and per-app volume
 camera = true       # green dot while a camera is on, red dot while the screen is shared
 phone = true        # phone notifications via KDE Connect
 downloads = true    # download progress bar
@@ -31,13 +35,18 @@ mascot_awake = 30   # seconds idle before the eyes appear
 mascot_sleep = 180  # seconds idle before they fall asleep
 
 [colors]
-# Notch gradient, top-left to bottom-right, as #rrggbb.
+# "nusa" (dark blue), "midnight" (black), "rose", "forest", or "custom" to use `gradient` below.
+# follow_cover / follow_wallpaper tint over the theme while they apply; turn them off to
+# see the theme's own gradient all the time.
+theme = "nusa"
+# Only used with theme = "custom": notch gradient, top-left to bottom-right, as #rrggbb.
 gradient = ["#020510", "#061338", "#0c225c"]
 follow_cover = true      # tint with the album cover while music plays
 follow_wallpaper = true  # tint with the Plasma wallpaper when idle
 "##;
 
 pub(crate) struct Config {
+    pub(crate) english: bool,
     pub(crate) minimal: bool,
     pub(crate) mascot: bool,
     pub(crate) lyrics: bool,
@@ -46,6 +55,7 @@ pub(crate) struct Config {
     pub(crate) stats: bool,
     pub(crate) clipboard: bool,
     pub(crate) mic: bool,
+    pub(crate) mixer: bool,
     pub(crate) camera: bool,
     pub(crate) phone: bool,
     pub(crate) downloads: bool,
@@ -55,6 +65,12 @@ pub(crate) struct Config {
     pub(crate) mascot_awake: u32,
     pub(crate) mascot_sleep: u32,
     pub(crate) gradient: [String; 3],
+    /// Secondary text (artist, stats, times).
+    pub(crate) muted: String,
+    /// Equalizer bars and progress bars.
+    pub(crate) accent: String,
+    /// Slider fill and knob, play button, active toggles.
+    pub(crate) highlight: String,
     pub(crate) follow_cover: bool,
     pub(crate) follow_wallpaper: bool,
 }
@@ -105,14 +121,17 @@ fn parse_config(text: &str) -> Config {
     let secs = |key: &str, default: u32| {
         item("timing", key).and_then(|i| i.as_integer()).map(|n| n.clamp(5, 3600) as u32).unwrap_or(default)
     };
-    let defaults = ["#020510", "#061338", "#0c225c"];
+    let theme_name = doc.get("colors").and_then(|c| c.get("theme")?.as_str()).unwrap_or("nusa");
+    let theme = THEMES.iter().find(|t| t.0 == theme_name).unwrap_or(&THEMES[0]);
     let gradient = std::array::from_fn(|i| {
-        doc.get("colors")
-            .and_then(|c| c.get("gradient")?.as_array()?.get(i)?.as_str().map(str::to_owned))
-            .filter(|c| is_hex_color(c))
-            .unwrap_or_else(|| defaults[i].to_owned())
+        let custom = doc.get("colors").and_then(|c| c.get("gradient")?.as_array()?.get(i)?.as_str().map(str::to_owned));
+        match custom.filter(|c| theme_name == "custom" && is_hex_color(c)) {
+            Some(c) => c,
+            None => theme.1[i].to_owned(),
+        }
     });
     Config {
+        english: item("", "language").and_then(|i| i.as_str().map(|l| l == "en")).unwrap_or(false),
         minimal: item("", "minimal").and_then(|i| i.as_bool()).unwrap_or(false),
         mascot: flag("", "mascot"),
         lyrics: flag("features", "lyrics"),
@@ -121,6 +140,7 @@ fn parse_config(text: &str) -> Config {
         stats: flag("features", "stats"),
         clipboard: flag("features", "clipboard"),
         mic: flag("features", "mic"),
+        mixer: flag("features", "mixer"),
         camera: flag("features", "camera"),
         phone: flag("features", "phone"),
         downloads: flag("features", "downloads"),
@@ -130,14 +150,61 @@ fn parse_config(text: &str) -> Config {
         mascot_awake: secs("mascot_awake", 30),
         mascot_sleep: secs("mascot_sleep", 180),
         gradient,
+        muted: theme.2.to_owned(),
+        accent: theme.3.to_owned(),
+        highlight: theme.4.to_owned(),
         follow_cover: flag("colors", "follow_cover"),
         follow_wallpaper: flag("colors", "follow_wallpaper"),
     }
 }
 
+/// (name, gradient, muted text, accent, highlight). "custom" keeps the nusa text and control colors.
+const THEMES: [(&str, [&str; 3], &str, &str, &str); 5] = [
+    ("nusa", ["#020510", "#061338", "#0c225c"], "#b9cdf5", "#8fd8ff", "#ffffff"),
+    ("midnight", ["#000000", "#0b0b0d", "#1c1c1f"], "#a1a1aa", "#e5e5ea", "#ffffff"),
+    ("rose", ["#12030a", "#3a0b24", "#6b1740"], "#f5b9d3", "#ff8fc4", "#ffa3d1"),
+    ("forest", ["#020a05", "#0b2a17", "#155e34"], "#b9f5cf", "#8fffb8", "#a3ffc4"),
+    ("custom", ["#020510", "#061338", "#0c225c"], "#b9cdf5", "#8fd8ff", "#ffffff"),
+];
+
+/// Indonesian or English text, per `language` in config.toml.
+pub(crate) fn tr(id: &'static str, en: &'static str) -> &'static str {
+    if cfg().english { en } else { id }
+}
+
 /// Colors go straight into CSS, so only accept #rrggbb.
 fn is_hex_color(c: &str) -> bool {
     c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+/// Theme names in the order the tray lists them.
+pub(crate) fn theme_names() -> Vec<&'static str> {
+    THEMES.iter().map(|t| t.0).collect()
+}
+
+/// `[colors] theme` as written in the file, "nusa" when unset or unknown.
+pub(crate) fn current_theme_name() -> &'static str {
+    let text = std::fs::read_to_string(config_path()).unwrap_or_default();
+    let doc: toml_edit::DocumentMut = text.parse().unwrap_or_default();
+    let name = doc.get("colors").and_then(|c| c.get("theme")?.as_str().map(str::to_owned)).unwrap_or_default();
+    THEMES.iter().find(|t| t.0 == name).map_or("nusa", |t| t.0)
+}
+
+/// The settings as they are in the file now (cfg() keeps the ones Nusa started with).
+pub(crate) fn read_config() -> Config {
+    parse_config(&std::fs::read_to_string(config_path()).unwrap_or_default())
+}
+
+/// Store `[colors] theme` from the tray, keeping the file's comments and layout.
+pub(crate) fn save_theme(name: &str) {
+    let path = config_path();
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|_| TEMPLATE.to_owned());
+    let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else { return };
+    if !doc.contains_table("colors") {
+        doc["colors"] = toml_edit::table();
+    }
+    doc["colors"]["theme"] = toml_edit::value(name);
+    let _ = std::fs::create_dir_all(path.parent().unwrap()).and_then(|_| std::fs::write(&path, doc.to_string()));
 }
 
 /// Store a top-level toggle from the tray, keeping the file's comments and layout.
@@ -155,11 +222,25 @@ fn config_parsing() {
     assert!(!c.minimal && c.mascot && c.lyrics && c.follow_wallpaper);
     assert_eq!((c.mascot_awake, c.mascot_sleep), (30, 180));
     assert_eq!(c.gradient[0], "#020510");
+    assert!(!c.english && c.mixer);
 
-    let c = parse_config("minimal = true\n[features]\nclipboard = false\n[timing]\nmascot_awake = 1\n[colors]\ngradient = [\"#ff0000\", \"red; }\", \"#00ff00\"]\n");
+    let c = parse_config("minimal = true\nlanguage = \"en\"\n[features]\nclipboard = false\n[timing]\nmascot_awake = 1\n[colors]\ntheme = \"custom\"\ngradient = [\"#ff0000\", \"red; }\", \"#00ff00\"]\n");
+    assert!(c.english);
     assert!(c.minimal && !c.clipboard && c.lyrics, "unset keys keep their defaults");
     assert_eq!(c.mascot_awake, 5, "timing is clamped");
     assert_eq!(c.gradient, ["#ff0000", "#061338", "#00ff00"].map(String::from), "bad colors fall back");
 
     assert!(parse_config("this is [ not toml").lyrics, "a broken file means defaults");
+
+    let rose = parse_config("[colors]\ntheme = \"rose\"\ngradient = [\"#ff0000\", \"#ff0000\", \"#ff0000\"]\n");
+    assert_eq!((rose.gradient[1].as_str(), rose.accent.as_str()), ("#3a0b24", "#ff8fc4"), "a preset ignores gradient");
+    assert_eq!(rose.highlight, "#ffa3d1");
+
+    // Every theme fills every color token in the stylesheet.
+    for (name, ..) in THEMES {
+        let css = themed_css(&parse_config(&format!("[colors]\ntheme = \"{name}\"\n")));
+        let leftover = css.match_indices('{').any(|(i, _)| css[i + 1..].starts_with(|ch: char| ch.is_ascii_uppercase()));
+        assert!(!leftover, "theme {name} left a color token unfilled");
+    }
+    assert_eq!(parse_config("[colors]\ntheme = \"neon\"\n").gradient[0], "#020510", "unknown theme falls back to nusa");
 }

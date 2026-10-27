@@ -37,10 +37,10 @@ pub(crate) fn spawn_capture_watch(ui: &Ui, state: &Shared) {
                 (!st.cam_apps.is_empty() || st.cam_pw, st.sharing, st.cam_apps.join(", "))
             };
             if share_now && !share_before {
-                show_alert(&ui, &state, "🖥  Layar sedang di-share".into());
+                show_alert(&ui, &state, tr("🖥  Layar sedang di-share", "🖥  Screen is being shared").into());
             } else if cam_now && !cam_before {
                 let who = if apps.is_empty() { String::new() } else { format!(" · {apps}") };
-                show_alert(&ui, &state, format!("📷  Kamera dipakai{who}"));
+                show_alert(&ui, &state, format!("{}{who}", tr("📷  Kamera dipakai", "📷  Camera in use")));
             } else {
                 refresh_compact(&ui, &state.borrow());
             }

@@ -53,11 +53,14 @@ pub(crate) fn migrate_autostart() {
 pub(crate) enum TrayMsg {
     Minimal(bool),
     Mascot(bool),
+    Theme(usize),
     Reload,
     Quit,
 }
 
 pub(crate) struct Tray {
+    /// Index into theme_names().
+    theme: usize,
     minimal: bool,
     mascot: bool,
     tx: async_channel::Sender<TrayMsg>,
@@ -92,14 +95,14 @@ impl ksni::Tray for Tray {
         use ksni::menu::{CheckmarkItem, StandardItem};
         vec![
             CheckmarkItem {
-                label: "Start with login".into(),
+                label: tr("Jalan saat login", "Start with login").into(),
                 checked: autostart_enabled(),
                 activate: Box::new(|_| set_autostart(!autostart_enabled())),
                 ..Default::default()
             }
             .into(),
             CheckmarkItem {
-                label: "Minimal notch".into(),
+                label: tr("Notch minimal", "Minimal notch").into(),
                 checked: self.minimal,
                 activate: Box::new(|t: &mut Self| {
                     t.minimal = !t.minimal;
@@ -109,7 +112,7 @@ impl ksni::Tray for Tray {
             }
             .into(),
             CheckmarkItem {
-                label: "Mascot".into(),
+                label: tr("Maskot", "Mascot").into(),
                 checked: self.mascot,
                 activate: Box::new(|t: &mut Self| {
                     t.mascot = !t.mascot;
@@ -118,9 +121,31 @@ impl ksni::Tray for Tray {
                 ..Default::default()
             }
             .into(),
+            ksni::menu::SubMenu {
+                label: tr("Tema", "Theme").into(),
+                submenu: vec![
+                    ksni::menu::RadioGroup {
+                        selected: self.theme,
+                        select: Box::new(|t: &mut Self, i| {
+                            t.theme = i;
+                            let _ = t.tx.send_blocking(TrayMsg::Theme(i));
+                        }),
+                        options: theme_names()
+                            .into_iter()
+                            .map(|n| ksni::menu::RadioItem {
+                                label: n[..1].to_uppercase() + &n[1..],
+                                ..Default::default()
+                            })
+                            .collect(),
+                    }
+                    .into(),
+                ],
+                ..Default::default()
+            }
+            .into(),
             ksni::MenuItem::Separator,
             StandardItem {
-                label: "Edit settings".into(),
+                label: tr("Edit setting", "Edit settings").into(),
                 activate: Box::new(|_| {
                     let _ = std::process::Command::new("xdg-open").arg(config_path()).spawn();
                 }),
@@ -128,7 +153,7 @@ impl ksni::Tray for Tray {
             }
             .into(),
             StandardItem {
-                label: "Reload".into(),
+                label: tr("Muat ulang", "Reload").into(),
                 activate: Box::new(|t: &mut Self| {
                     let _ = t.tx.send_blocking(TrayMsg::Reload);
                 }),
@@ -136,7 +161,7 @@ impl ksni::Tray for Tray {
             }
             .into(),
             StandardItem {
-                label: "Exit".into(),
+                label: tr("Keluar", "Exit").into(),
                 activate: Box::new(|t: &mut Self| {
                     let _ = t.tx.send_blocking(TrayMsg::Quit);
                 }),
@@ -150,7 +175,9 @@ impl ksni::Tray for Tray {
 pub(crate) fn spawn_tray(app: &gtk::Application, ui: &Ui, state: &Shared) {
     use ksni::blocking::TrayMethods;
     let (tx, rx) = async_channel::unbounded();
-    let handle = match (Tray { minimal: state.borrow().minimal, mascot: !state.borrow().mascot_off, tx }).spawn() {
+    let handle = match (Tray {
+        theme: theme_names().iter().position(|n| *n == current_theme_name()).unwrap_or(0),
+        minimal: state.borrow().minimal, mascot: !state.borrow().mascot_off, tx }).spawn() {
         Ok(h) => h,
         Err(e) => return eprintln!("tray: {e}"),
     };
@@ -173,11 +200,18 @@ pub(crate) fn spawn_tray(app: &gtk::Application, ui: &Ui, state: &Shared) {
                 }
                 // Settings are read once at startup, so reloading means starting over in place.
                 // exec keeps the PID, so a systemd service doesn't see it as an exit.
+                // Apply right away: rebuild the stylesheet from the saved theme, no reload needed.
+                TrayMsg::Theme(i) => {
+                    if let Some(name) = theme_names().get(i) {
+                        save_theme(name);
+                        ui.css.load_from_string(&themed_css(&read_config()));
+                    }
+                }
                 TrayMsg::Reload => {
                     use std::os::unix::process::CommandExt;
                     stop_watchers();
                     let err = std::process::Command::new(std::env::current_exe().unwrap_or_default()).exec();
-                    show_alert(&ui, &state, format!("Reload gagal: {err}"));
+                    show_alert(&ui, &state, format!("{}: {err}", tr("Muat ulang gagal", "Reload failed")));
                 }
                 TrayMsg::Quit => app.quit(),
             }
