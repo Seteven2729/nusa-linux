@@ -12,39 +12,74 @@ struct AppStream {
 }
 
 fn list_app_streams() -> Vec<AppStream> {
-    let Ok(out) = std::process::Command::new("pactl").args(["-f", "json", "list", "sink-inputs"]).output() else { return vec![] };
+    let Ok(out) = std::process::Command::new("pactl")
+        .args(["-f", "json", "list", "sink-inputs"])
+        .output()
+    else {
+        return vec![];
+    };
     let list: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
     list.as_array()
         .into_iter()
         .flatten()
         .filter_map(|s| {
             let props = &s["properties"];
-            let name = app_label(props["application.name"].as_str().or(props["application.process.binary"].as_str())?);
+            let name = app_label(
+                props["application.name"]
+                    .as_str()
+                    .or(props["application.process.binary"].as_str())?,
+            );
             // Channels are usually equal; take the loudest.
             let volume = s["volume"]
                 .as_object()?
                 .values()
-                .filter_map(|c| c["value_percent"].as_str()?.trim_end_matches('%').parse::<f64>().ok())
+                .filter_map(|c| {
+                    c["value_percent"]
+                        .as_str()?
+                        .trim_end_matches('%')
+                        .parse::<f64>()
+                        .ok()
+                })
                 .fold(0.0, f64::max)
                 / 100.0;
-            Some(AppStream { index: s["index"].as_u64()? as u32, name, volume, muted: s["mute"].as_bool().unwrap_or(false) })
+            Some(AppStream {
+                index: s["index"].as_u64()? as u32,
+                name,
+                volume,
+                muted: s["mute"].as_bool().unwrap_or(false),
+            })
         })
         .collect()
 }
 
 /// "PipeWire ALSA [strawberry]" -> "Strawberry"; "Firefox" stays.
 fn app_label(raw: &str) -> String {
-    let inner = raw.rsplit_once('[').and_then(|(_, r)| r.strip_suffix(']')).unwrap_or(raw).trim();
+    let inner = raw
+        .rsplit_once('[')
+        .and_then(|(_, r)| r.strip_suffix(']'))
+        .unwrap_or(raw)
+        .trim();
     let mut c = inner.chars();
-    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
 }
 
-fn output_volume() -> f64 {
-    let out = std::process::Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SINK@"]).output();
+fn output_volume() -> (f64, bool) {
+    let out = std::process::Command::new("wpctl")
+        .args(["get-volume", "@DEFAULT_AUDIO_SINK@"])
+        .output();
     // "Volume: 0.45" or "Volume: 0.45 [MUTED]"
-    out.ok()
-        .and_then(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().nth(1)?.parse().ok())
-        .unwrap_or(0.0)
+    let text = out
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let vol = text
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
+    (vol, text.contains("[MUTED]"))
 }
 
 /// Run a volume command off the main thread.
@@ -80,11 +115,15 @@ fn volume_slider(value: f64, apply: impl Fn(u32) + 'static) -> gtk::Scale {
 pub(crate) fn fill_mixer_page(ui: &Ui) {
     let ui = ui.clone();
     glib::spawn_future_local(async move {
-        let Ok((master, streams)) = gio::spawn_blocking(|| (output_volume(), list_app_streams())).await else { return };
+        let Ok(((master, master_muted), streams)) =
+            gio::spawn_blocking(|| (output_volume(), list_app_streams())).await
+        else {
+            return;
+        };
         while let Some(c) = ui.mixer_box.first_child() {
             ui.mixer_box.remove(&c);
         }
-        let row = |name: &str, slider: &gtk::Scale| {
+        let row = |name: &str, slider: &gtk::Scale, muted: bool, on_mute: Box<dyn Fn(bool)>| {
             let r = gtk::Box::new(gtk::Orientation::Horizontal, 8);
             let label = gtk::Label::builder()
                 .label(name)
@@ -93,35 +132,93 @@ pub(crate) fn fill_mixer_page(ui: &Ui) {
                 .max_width_chars(12)
                 .ellipsize(gtk::pango::EllipsizeMode::End)
                 .build();
-            r.append(&label);
-            r.append(slider);
-            r
-        };
-        let out = volume_slider(master, |v| {
-            run("wpctl", vec!["set-volume".into(), "-l".into(), "1.0".into(), "@DEFAULT_AUDIO_SINK@".into(), format!("{v}%")])
-        });
-        ui.mixer_box.append(&row(tr("🔊 Output", "🔊 Output"), &out));
-        if streams.is_empty() {
-            let none = tr("Tidak ada aplikasi yang memutar suara", "No apps playing audio");
-            ui.mixer_box.append(&gtk::Label::builder().label(none).css_classes(["time"]).xalign(0.0).build());
-        }
-        for s in streams {
-            let idx = s.index.to_string();
-            let i = idx.clone();
-            let slider = volume_slider(s.volume, move |v| run("pactl", vec!["set-sink-input-volume".into(), i.clone(), format!("{v}%")]));
-            let r = row(&s.name, &slider);
             let mute = gtk::ToggleButton::builder()
-                .icon_name(if s.muted { "audio-volume-muted-symbolic" } else { "audio-volume-high-symbolic" })
-                .active(s.muted)
+                .icon_name(if muted {
+                    "audio-volume-muted-symbolic"
+                } else {
+                    "audio-volume-high-symbolic"
+                })
+                .active(muted)
                 .css_classes(["panel-toggle"])
                 .tooltip_text(tr("Bisukan", "Mute"))
                 .build();
             mute.connect_toggled(move |b| {
-                b.set_icon_name(if b.is_active() { "audio-volume-muted-symbolic" } else { "audio-volume-high-symbolic" });
-                run("pactl", vec!["set-sink-input-mute".into(), idx.clone(), if b.is_active() { "1" } else { "0" }.into()]);
+                b.set_icon_name(if b.is_active() {
+                    "audio-volume-muted-symbolic"
+                } else {
+                    "audio-volume-high-symbolic"
+                });
+                on_mute(b.is_active());
             });
+            r.append(&label);
+            r.append(slider);
             r.append(&mute);
-            ui.mixer_box.append(&r);
+            r
+        };
+        let out = volume_slider(master, |v| {
+            run(
+                "wpctl",
+                vec![
+                    "set-volume".into(),
+                    "-l".into(),
+                    "1.0".into(),
+                    "@DEFAULT_AUDIO_SINK@".into(),
+                    format!("{v}%"),
+                ],
+            )
+        });
+        ui.mixer_box.append(&row(
+            "Output",
+            &out,
+            master_muted,
+            Box::new(|m| {
+                run(
+                    "wpctl",
+                    vec![
+                        "set-mute".into(),
+                        "@DEFAULT_AUDIO_SINK@".into(),
+                        if m { "1" } else { "0" }.into(),
+                    ],
+                )
+            }),
+        ));
+        if streams.is_empty() {
+            let none = tr(
+                "Tidak ada aplikasi yang memutar suara",
+                "No apps playing audio",
+            );
+            ui.mixer_box.append(
+                &gtk::Label::builder()
+                    .label(none)
+                    .css_classes(["time"])
+                    .xalign(0.0)
+                    .build(),
+            );
+        }
+        for s in streams {
+            let idx = s.index.to_string();
+            let i = idx.clone();
+            let slider = volume_slider(s.volume, move |v| {
+                run(
+                    "pactl",
+                    vec!["set-sink-input-volume".into(), i.clone(), format!("{v}%")],
+                )
+            });
+            ui.mixer_box.append(&row(
+                &s.name,
+                &slider,
+                s.muted,
+                Box::new(move |m| {
+                    run(
+                        "pactl",
+                        vec![
+                            "set-sink-input-mute".into(),
+                            idx.clone(),
+                            if m { "1" } else { "0" }.into(),
+                        ],
+                    )
+                }),
+            ));
         }
     });
 }
@@ -143,9 +240,15 @@ pub(crate) fn spawn_mixer_watch(ui: &Ui) {
         }
         let Ok(mut child) = cmd.spawn() else { return };
         register_watcher(child.id() as i32);
-        for line in std::io::BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok) {
+        for line in std::io::BufReader::new(child.stdout.take().unwrap())
+            .lines()
+            .map_while(Result::ok)
+        {
             // "Event 'new' on sink-input #343" / "Event 'remove' on sink-input #343"
-            if line.contains("sink-input") && !line.contains("'change'") && tx.send_blocking(()).is_err() {
+            if line.contains("sink-input")
+                && !line.contains("'change'")
+                && tx.send_blocking(()).is_err()
+            {
                 return;
             }
         }

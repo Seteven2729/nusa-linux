@@ -16,14 +16,27 @@ fn strip_partial(name: &str) -> Option<&str> {
 /// True when `dir` still has an in-progress partial file for `name` (Firefox/Zen create a
 /// 0-byte `<name>` placeholder alongside `<name>.part` when a download starts).
 fn has_partial(dir: &std::path::Path, name: &str) -> bool {
-    PARTIAL.iter().any(|p| dir.join(format!("{name}{p}")).exists())
+    PARTIAL
+        .iter()
+        .any(|p| dir.join(format!("{name}{p}")).exists())
 }
 
 fn is_browser(s: &str) -> bool {
     let s = s.to_ascii_lowercase();
     [
-        "firefox", "zen", "chrom", "brave", "vivaldi", "edge", "opera", "librewolf", "waterfox",
-        "floorp", "thorium", "epiphany", "falkon",
+        "firefox",
+        "zen",
+        "chrom",
+        "brave",
+        "vivaldi",
+        "edge",
+        "opera",
+        "librewolf",
+        "waterfox",
+        "floorp",
+        "thorium",
+        "epiphany",
+        "falkon",
     ]
     .iter()
     .any(|b| s.contains(b))
@@ -54,7 +67,10 @@ pub(crate) async fn download_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
         let Some(sender) = msg.header().sender().map(|s| s.to_string()) else {
             continue;
         };
-        let Ok((uri, props)) = msg.body().deserialize::<(String, HashMap<String, OwnedVariant>)>() else {
+        let Ok((uri, props)) = msg
+            .body()
+            .deserialize::<(String, HashMap<String, OwnedVariant>)>()
+        else {
             continue;
         };
         if !is_browser(&uri) {
@@ -63,7 +79,10 @@ pub(crate) async fn download_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
                 for name in dbus.list_names().await.unwrap_or_default() {
                     if name.starts_with("org.mpris.MediaPlayer2.")
                         && !is_browser(&name)
-                        && dbus.get_name_owner(name.as_ref()).await.is_ok_and(|o| o.as_str() == sender)
+                        && dbus
+                            .get_name_owner(name.as_ref())
+                            .await
+                            .is_ok_and(|o| o.as_str() == sender)
                     {
                         player = true;
                     }
@@ -76,10 +95,16 @@ pub(crate) async fn download_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
         }
         let e = entries.entry(uri.clone()).or_insert((0.0, false));
         let was_visible = e.1;
-        if let Some(p) = props.get("progress").and_then(|v| f64::try_from(v.try_clone().ok()?).ok()) {
+        if let Some(p) = props
+            .get("progress")
+            .and_then(|v| f64::try_from(v.try_clone().ok()?).ok())
+        {
             e.0 = p.clamp(0.0, 1.0);
         }
-        if let Some(v) = props.get("progress-visible").and_then(|v| bool::try_from(v.try_clone().ok()?).ok()) {
+        if let Some(v) = props
+            .get("progress-visible")
+            .and_then(|v| bool::try_from(v.try_clone().ok()?).ok())
+        {
             e.1 = v;
         }
         let (progress, visible) = *e;
@@ -97,14 +122,21 @@ pub(crate) async fn download_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
             state.borrow_mut().download = Some((app, pct(progress), progress));
             refresh_compact(&ui, &state.borrow());
         } else if was_visible {
-            let showing = state.borrow().download.as_ref().is_some_and(|(a, _, _)| *a == app);
+            let showing = state
+                .borrow()
+                .download
+                .as_ref()
+                .is_some_and(|(a, _, _)| *a == app);
             if showing {
                 state.borrow_mut().download = None;
             }
             show_alert(
                 &ui,
                 &state,
-                format!("{} · {app}", tr("⬇  Download selesai", "⬇  Download finished")),
+                format!(
+                    "{} · {app}",
+                    tr("⬇  Download selesai", "⬇  Download finished")
+                ),
             );
         }
         if ui.pages.visible_child_name().as_deref() == Some("downloads") {
@@ -153,7 +185,9 @@ pub(crate) fn spawn_download_watch(ui: &Ui, state: &Shared) {
                 let emask = u32::from_ne_bytes(buf[off + 4..off + 8].try_into().unwrap());
                 let len = u32::from_ne_bytes(buf[off + 12..off + 16].try_into().unwrap()) as usize;
                 let name = &buf[off + 16..off + 16 + len];
-                let name = String::from_utf8_lossy(name.split(|b| *b == 0).next().unwrap_or_default()).into_owned();
+                let name =
+                    String::from_utf8_lossy(name.split(|b| *b == 0).next().unwrap_or_default())
+                        .into_owned();
                 off += 16 + len;
                 if name.is_empty() || name.starts_with('.') {
                     continue;
@@ -211,9 +245,9 @@ pub(crate) fn spawn_download_watch(ui: &Ui, state: &Shared) {
                         && meta.len() > 0
                         && !has_partial(&dir, &name)
                     {
-                        let dup = last_done
-                            .as_ref()
-                            .is_some_and(|(n, t)| *n == name && t.elapsed() < Duration::from_secs(1));
+                        let dup = last_done.as_ref().is_some_and(|(n, t)| {
+                            *n == name && t.elapsed() < Duration::from_secs(1)
+                        });
                         if !dup {
                             last_done = Some((name.clone(), std::time::Instant::now()));
                             finished = Some(name);
@@ -244,11 +278,17 @@ pub(crate) fn spawn_download_watch(ui: &Ui, state: &Shared) {
             });
             live.sort_by(|a, b| b.2.cmp(&a.2));
             let latest = live.first().map(|(name, bytes, _)| {
-                (name.clone(), human_size(*bytes, cfg().english), part_fraction(*bytes))
+                (
+                    name.clone(),
+                    human_size(*bytes, cfg().english),
+                    part_fraction(*bytes),
+                )
             });
             let mut active: Vec<(String, String, f64)> = live
                 .into_iter()
-                .map(|(name, bytes, _)| (name, human_size(bytes, cfg().english), part_fraction(bytes)))
+                .map(|(name, bytes, _)| {
+                    (name, human_size(bytes, cfg().english), part_fraction(bytes))
+                })
                 .collect();
             active.sort_by(|a, b| a.0.cmp(&b.0));
             {
@@ -260,7 +300,10 @@ pub(crate) fn spawn_download_watch(ui: &Ui, state: &Shared) {
                 show_alert(
                     &ui,
                     &state,
-                    format!("{} · {name}", tr("⬇  Download selesai", "⬇  Download finished")),
+                    format!(
+                        "{} · {name}",
+                        tr("⬇  Download selesai", "⬇  Download finished")
+                    ),
                 );
             } else {
                 refresh_compact(&ui, &state.borrow());
@@ -274,7 +317,8 @@ pub(crate) fn spawn_download_watch(ui: &Ui, state: &Shared) {
 
 /// "application://org.mozilla.firefox.desktop" -> "firefox", "application://google-chrome.desktop" -> "google-chrome".
 pub(crate) fn downloads_dir() -> PathBuf {
-    glib::user_special_dir(glib::UserDirectory::Downloads).unwrap_or_else(|| glib::home_dir().join("Downloads"))
+    glib::user_special_dir(glib::UserDirectory::Downloads)
+        .unwrap_or_else(|| glib::home_dir().join("Downloads"))
 }
 
 /// Rebuild the downloads page: a progress row per active download, then the newest files.
@@ -284,9 +328,18 @@ pub(crate) fn fill_downloads_page(ui: &Ui, st: &State) {
             b.remove(&c);
         }
     }
-    let muted = |text: &str| gtk::Label::builder().label(text).css_classes(["time"]).xalign(0.0).build();
+    let muted = |text: &str| {
+        gtk::Label::builder()
+            .label(text)
+            .css_classes(["time"])
+            .xalign(0.0)
+            .build()
+    };
     if st.downloads.is_empty() {
-        ui.dl_active.append(&muted(tr("Tidak ada download aktif", "No active downloads")));
+        ui.dl_active.append(&muted(tr(
+            "Tidak ada download aktif",
+            "No active downloads",
+        )));
     }
     for (name, label, p) in &st.downloads {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -301,22 +354,32 @@ pub(crate) fn fill_downloads_page(ui: &Ui, st: &State) {
         );
         row.append(&muted(label));
         ui.dl_active.append(&row);
-        ui.dl_active
-            .append(&gtk::ProgressBar::builder().fraction(*p).css_classes(["dl"]).build());
+        ui.dl_active.append(
+            &gtk::ProgressBar::builder()
+                .fraction(*p)
+                .css_classes(["dl"])
+                .build(),
+        );
     }
     let files = recent_downloads(&downloads_dir(), 4);
     if files.is_empty() {
-        ui.dl_recent
-            .append(&muted(tr("Folder Download kosong", "Downloads folder is empty")));
+        ui.dl_recent.append(&muted(tr(
+            "Folder Download kosong",
+            "Downloads folder is empty",
+        )));
     }
     let now = std::time::SystemTime::now();
     for (path, size, modified) in files {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let age = now.duration_since(modified).unwrap_or_default().as_secs();
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.append(&gtk::Image::from_icon_name("text-x-generic-symbolic"));
         row.append(
             &gtk::Label::builder()
-                .label(format!("📄  {name}"))
+                .label(&name)
                 .hexpand(true)
                 .xalign(0.0)
                 .ellipsize(gtk::pango::EllipsizeMode::Middle)
@@ -328,9 +391,15 @@ pub(crate) fn fill_downloads_page(ui: &Ui, st: &State) {
             human_size(size, cfg().english),
             ago(age, cfg().english)
         )));
-        let btn = gtk::Button::builder().child(&row).css_classes(["clip"]).build();
+        let btn = gtk::Button::builder()
+            .child(&row)
+            .css_classes(["clip"])
+            .build();
         btn.connect_clicked(move |_| {
-            let _ = gio::AppInfo::launch_default_for_uri(&gio::File::for_path(&path).uri(), None::<&gio::AppLaunchContext>);
+            let _ = gio::AppInfo::launch_default_for_uri(
+                &gio::File::for_path(&path).uri(),
+                None::<&gio::AppLaunchContext>,
+            );
         });
         ui.dl_recent.append(&btn);
     }
@@ -423,13 +492,17 @@ fn download_page_formatting() {
     );
     assert_eq!(strip_partial("zen.tar.xz.part"), Some("zen.tar.xz"));
     assert!(is_browser("application://zen.desktop"));
-    assert!(!is_browser("application://org.strawberrymusicplayer.strawberry.desktop"));
+    assert!(!is_browser(
+        "application://org.strawberrymusicplayer.strawberry.desktop"
+    ));
     assert!(part_fraction(0) >= 0.08 && part_fraction(500_000_000) <= 0.92);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
 pub(crate) fn app_name(uri: &str) -> String {
-    let id = uri.trim_start_matches("application://").trim_end_matches(".desktop");
+    let id = uri
+        .trim_start_matches("application://")
+        .trim_end_matches(".desktop");
     id.rsplit('.').next().unwrap_or(id).to_string()
 }
 
@@ -467,17 +540,28 @@ pub(crate) async fn network_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
         if now >= 70 && !online {
             online = true;
             let path = nm.primary_connection().await?;
-            let active = ActiveConnectionProxy::builder(&conn).path(path).build().await?;
+            let active = ActiveConnectionProxy::builder(&conn)
+                .path(path)
+                .build()
+                .await?;
             let name = active.id().await.unwrap_or_default();
             let icon = if active.kind().await.as_deref() == Ok("802-11-wireless") {
                 "📶"
             } else {
                 "🔌"
             };
-            show_alert(&ui, &state, format!("{icon}  {} · {name}", tr("Terhubung", "Connected")));
+            show_alert(
+                &ui,
+                &state,
+                format!("{icon}  {} · {name}", tr("Terhubung", "Connected")),
+            );
         } else if now <= 20 && online {
             online = false;
-            show_alert(&ui, &state, tr("⚠  Internet terputus", "⚠  Internet disconnected").into());
+            show_alert(
+                &ui,
+                &state,
+                tr("⚠  Internet terputus", "⚠  Internet disconnected").into(),
+            );
         }
     }
     Ok(())
@@ -494,23 +578,36 @@ pub(crate) async fn bluetooth_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
         .build()?;
     let mut stream = MessageStream::for_match_rule(rule, &conn, None).await?;
     while let Some(Ok(msg)) = stream.next().await {
-        let Ok((_, changed, _)) = msg.body().deserialize::<(String, HashMap<String, OwnedVariant>, Vec<String>)>() else {
+        let Ok((_, changed, _)) = msg
+            .body()
+            .deserialize::<(String, HashMap<String, OwnedVariant>, Vec<String>)>()
+        else {
             continue;
         };
-        let Some(connected) = changed.get("Connected").and_then(|v| bool::try_from(v.try_clone().ok()?).ok()) else {
+        let Some(connected) = changed
+            .get("Connected")
+            .and_then(|v| bool::try_from(v.try_clone().ok()?).ok())
+        else {
             continue;
         };
         let Some(path) = msg.header().path().map(|p| p.to_owned()) else {
             continue;
         };
-        let dev = BtDeviceProxy::builder(&conn).path(path.clone()).build().await?;
+        let dev = BtDeviceProxy::builder(&conn)
+            .path(path.clone())
+            .build()
+            .await?;
         // Only audio gear (headphones, earbuds, speakers); mice and keyboards connect too often to be worth a popup.
         if !dev.icon().await.unwrap_or_default().starts_with("audio") {
             continue;
         }
         let name = dev.alias().await.unwrap_or_default();
         if !connected {
-            show_alert(&ui, &state, format!("🎧  {name} {}", tr("terputus", "disconnected")));
+            show_alert(
+                &ui,
+                &state,
+                format!("🎧  {name} {}", tr("terputus", "disconnected")),
+            );
             continue;
         }
         show_alert(&ui, &state, format!("🎧  {name}"));
@@ -538,7 +635,10 @@ pub(crate) fn change_volume(ui: &Ui, state: &Shared, step: &'static str) {
                 .args(["set-volume", "-l", "1.0", sink, step])
                 .status()
                 .ok()?;
-            let out = std::process::Command::new("wpctl").args(["get-volume", sink]).output().ok()?;
+            let out = std::process::Command::new("wpctl")
+                .args(["get-volume", sink])
+                .output()
+                .ok()?;
             Some(String::from_utf8_lossy(&out.stdout).into_owned())
         })
         .await
@@ -556,7 +656,10 @@ pub(crate) fn update_stats(ui: &Ui, cpu_prev: &mut Option<(u64, u64)>) {
     let set_meter = |i: usize, frac: f64, text: String, hot: bool| {
         ui.stat_bars[i].set_fraction(frac.clamp(0.0, 1.0));
         ui.stat_vals[i].set_label(&text);
-        for w in [ui.stat_bars[i].upcast_ref::<gtk::Widget>(), ui.stat_vals[i].upcast_ref()] {
+        for w in [
+            ui.stat_bars[i].upcast_ref::<gtk::Widget>(),
+            ui.stat_vals[i].upcast_ref(),
+        ] {
             if hot {
                 w.add_css_class("hot");
             } else {
@@ -568,7 +671,11 @@ pub(crate) fn update_stats(ui: &Ui, cpu_prev: &mut Option<(u64, u64)>) {
         .ok()
         .and_then(|s| s.lines().next().map(str::to_owned))
     {
-        let v: Vec<u64> = line.split_whitespace().skip(1).filter_map(|n| n.parse().ok()).collect();
+        let v: Vec<u64> = line
+            .split_whitespace()
+            .skip(1)
+            .filter_map(|n| n.parse().ok())
+            .collect();
         let total: u64 = v.iter().sum();
         let idle = v.get(3).copied().unwrap_or(0) + v.get(4).copied().unwrap_or(0);
         let busy = total - idle;
@@ -594,7 +701,12 @@ pub(crate) fn update_stats(ui: &Ui, cpu_prev: &mut Option<(u64, u64)>) {
         }
     }
     if let Some(t) = cpu_temp() {
-        set_meter(2, ((t - 30) as f64 / 70.0).clamp(0.05, 1.0), format!("{t}°C"), t >= 75);
+        set_meter(
+            2,
+            ((t - 30) as f64 / 70.0).clamp(0.05, 1.0),
+            format!("{t}°C"),
+            t >= 75,
+        );
     }
 }
 
@@ -602,7 +714,11 @@ pub(crate) fn cpu_temp() -> Option<i64> {
     for dir in std::fs::read_dir("/sys/class/hwmon").ok()?.flatten() {
         let name = std::fs::read_to_string(dir.path().join("name")).unwrap_or_default();
         if ["k10temp", "coretemp", "zenpower", "cpu_thermal"].contains(&name.trim()) {
-            let milli: i64 = std::fs::read_to_string(dir.path().join("temp1_input")).ok()?.trim().parse().ok()?;
+            let milli: i64 = std::fs::read_to_string(dir.path().join("temp1_input"))
+                .ok()?
+                .trim()
+                .parse()
+                .ok()?;
             return Some(milli / 1000);
         }
     }
@@ -633,12 +749,17 @@ pub(crate) async fn clipboard_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
             } else {
                 flat
             };
-            let btn = gtk::Button::builder().label(format!("📋  {short}")).css_classes(["clip"]).build();
-            btn.child().and_then(|c| c.downcast::<gtk::Label>().ok()).inspect(|l| {
-                l.set_xalign(0.0);
-                l.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                l.set_max_width_chars(28);
-            });
+            let btn = gtk::Button::builder()
+                .label(&short)
+                .css_classes(["clip"])
+                .build();
+            btn.child()
+                .and_then(|c| c.downcast::<gtk::Label>().ok())
+                .inspect(|l| {
+                    l.set_xalign(0.0);
+                    l.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                    l.set_max_width_chars(28);
+                });
             btn.set_hexpand(true);
             let qr = gtk::Button::builder()
                 .icon_name("view-barcode-qr-symbolic")
@@ -673,7 +794,11 @@ const QR_MAX_CHARS: usize = 500;
 /// Show `text` as a QR code in place of the clipboard list.
 fn show_qr(ui: &Ui, state: &Shared, text: &str) {
     if text.chars().count() > QR_MAX_CHARS {
-        show_alert(ui, state, tr("Terlalu panjang untuk QR", "Too long for a QR code").into());
+        show_alert(
+            ui,
+            state,
+            tr("Terlalu panjang untuk QR", "Too long for a QR code").into(),
+        );
         return;
     }
     let Some((rgba, side)) = qr_rgba(text) else {
@@ -687,7 +812,7 @@ fn show_qr(ui: &Ui, state: &Shared, text: &str) {
         side * 4,
     );
     ui.qr_pic.set_paintable(Some(&tex));
-    ui.qr_view.set_visible(true);
+    ui.clip_stack.set_visible_child_name("qr");
     refresh_compact(ui, &state.borrow());
 }
 
@@ -721,7 +846,10 @@ fn qr_code_pixels() {
     let px = |x: usize, y: usize| rgba[(y * side + x) * 4];
     assert_eq!(px(0, 0), 255, "white quiet border");
     assert_eq!(px(8, 8), 0, "top-left finder pattern is dark");
-    assert!(qr_rgba(&"x".repeat(5000)).is_none(), "more than a QR code holds");
+    assert!(
+        qr_rgba(&"x".repeat(5000)).is_none(),
+        "more than a QR code holds"
+    );
 }
 
 /// Phone notifications forwarded by KDE Connect (calls show up as the dialer's notification).
@@ -740,7 +868,11 @@ pub(crate) async fn phone_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
         let Some(path) = msg.header().path().map(|p| format!("{p}/{id}")) else {
             continue;
         };
-        let Ok(n) = PhoneNotificationProxy::builder(&conn).path(path).build().await else {
+        let Ok(n) = PhoneNotificationProxy::builder(&conn)
+            .path(path)
+            .build()
+            .await
+        else {
             continue;
         };
         if n.silent().await.unwrap_or(false) {
@@ -751,7 +883,11 @@ pub(crate) async fn phone_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
             n.title().await.unwrap_or_default(),
             n.text().await.unwrap_or_default(),
         );
-        let body = [title, text].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join(": ");
+        let body = [title, text]
+            .into_iter()
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(": ");
         show_alert_for(&ui, &state, format!("📱  {app} · {body}"), 5);
     }
     Ok(())
@@ -797,8 +933,17 @@ pub(crate) fn spawn_mic_watch(ui: &Ui, state: &Shared) {
                 .filter(|o| !o["corked"].as_bool().unwrap_or(false))
                 // Level meters (volume applets) open monitor streams; they are not a mic in use.
                 .filter(|o| o["properties"]["stream.monitor"].as_str() != Some("true"))
-                .filter(|o| !o["properties"]["media.name"].as_str().unwrap_or("").contains("Peak"))
-                .filter_map(|o| o["properties"]["application.name"].as_str().map(str::to_owned))
+                .filter(|o| {
+                    !o["properties"]["media.name"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("Peak")
+                })
+                .filter_map(|o| {
+                    o["properties"]["application.name"]
+                        .as_str()
+                        .map(str::to_owned)
+                })
                 .collect();
             apps.dedup();
             apps
@@ -817,7 +962,10 @@ pub(crate) fn spawn_mic_watch(ui: &Ui, state: &Shared) {
         }
         let Ok(mut child) = cmd.spawn() else { return };
         register_watcher(child.id() as i32);
-        for line in std::io::BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok) {
+        for line in std::io::BufReader::new(child.stdout.take().unwrap())
+            .lines()
+            .map_while(Result::ok)
+        {
             if line.contains("source-output") {
                 let now = recording();
                 if now != last {
@@ -834,7 +982,11 @@ pub(crate) fn spawn_mic_watch(ui: &Ui, state: &Shared) {
             let name = apps.join(", ");
             state.borrow_mut().mic_apps = apps;
             if started {
-                show_alert(&ui, &state, format!("{} · {name}", tr("🎙  Mic dipakai", "🎙  Mic in use")));
+                show_alert(
+                    &ui,
+                    &state,
+                    format!("{} · {name}", tr("🎙  Mic dipakai", "🎙  Mic in use")),
+                );
             } else {
                 refresh_compact(&ui, &state.borrow());
             }
@@ -888,6 +1040,12 @@ pub(crate) fn wallpaper_image(path: &std::path::Path) -> Option<PathBuf> {
 #[test]
 pub(crate) fn launcher_app_name() {
     assert_eq!(app_name("application://firefox.desktop"), "firefox");
-    assert_eq!(app_name("application://org.mozilla.firefox.desktop"), "firefox");
-    assert_eq!(app_name("application://google-chrome.desktop"), "google-chrome");
+    assert_eq!(
+        app_name("application://org.mozilla.firefox.desktop"),
+        "firefox"
+    );
+    assert_eq!(
+        app_name("application://google-chrome.desktop"),
+        "google-chrome"
+    );
 }

@@ -11,28 +11,47 @@ pub(crate) async fn mpris_loop(ui: Ui, state: Shared) -> zbus::Result<()> {
         .member("PropertiesChanged")
         .path("/org/mpris/MediaPlayer2")
         .build()?;
-    let props = MessageStream::for_match_rule(rule, &conn, None).await?.map(|_| ());
+    let props = MessageStream::for_match_rule(rule, &conn, None)
+        .await?
+        .map(|_| ());
     let owners = dbus
         .receive_name_owner_changed()
         .await?
-        .filter(|s| std::future::ready(s.args().is_ok_and(|a| a.name().starts_with("org.mpris.MediaPlayer2."))))
+        .filter(|s| {
+            std::future::ready(
+                s.args()
+                    .is_ok_and(|a| a.name().starts_with("org.mpris.MediaPlayer2.")),
+            )
+        })
         .map(|_| ());
     // The player switch button asks for a re-pick through this channel.
     let (repick_tx, repick_rx) = async_channel::unbounded::<()>();
     state.borrow_mut().repick = Some(repick_tx);
     // async_channel's Receiver isn't Unpin, so pin the merged stream to poll it.
-    let mut events = std::pin::pin!(futures_util::stream::select(futures_util::stream::select(props, owners), repick_rx));
+    let mut events = std::pin::pin!(futures_util::stream::select(
+        futures_util::stream::select(props, owners),
+        repick_rx
+    ));
 
     // Re-pick from every live player on each event instead of tracking incrementally,
     // so closed players and failed calls can never leave a stale choice behind.
     loop {
-        let current = state.borrow().player.as_ref().map(|p| p.inner().destination().to_string());
+        let current = state
+            .borrow()
+            .player
+            .as_ref()
+            .map(|p| p.inner().destination().to_string());
         let pinned = state.borrow().pinned.clone();
-        let (picked, players) = pick_player(&conn, &dbus, current.as_deref(), pinned.as_deref()).await;
+        let (picked, players) =
+            pick_player(&conn, &dbus, current.as_deref(), pinned.as_deref()).await;
         {
             let mut st = state.borrow_mut();
             // A pinned player that closed releases the pin; picking goes back to automatic.
-            if st.pinned.as_ref().is_some_and(|p| !players.iter().any(|(o, _)| o == p)) {
+            if st
+                .pinned
+                .as_ref()
+                .is_some_and(|p| !players.iter().any(|(o, _)| o == p))
+            {
                 st.pinned = None;
             }
             st.players = players;
@@ -78,23 +97,35 @@ pub(crate) async fn pick_player(
         let Ok(status) = p.playback_status().await else {
             continue;
         };
-        let identity = match MediaPlayerProxy::builder(conn).destination(owner.to_string()).build().await {
+        let identity = match MediaPlayerProxy::builder(conn)
+            .destination(owner.to_string())
+            .build()
+            .await
+        {
             Ok(mp) => mp.identity().await.ok(),
             Err(_) => None,
         };
         // "firefox.instance_1_23" -> "firefox" when the player has no Identity.
-        let label = identity.unwrap_or_else(|| suffix.split('.').next().unwrap_or(suffix).to_owned());
+        let label =
+            identity.unwrap_or_else(|| suffix.split('.').next().unwrap_or(suffix).to_owned());
         alive.push((owner.to_string(), label, status == "Playing", p));
     }
     let is = |o: &str, want: Option<&str>| Some(o) == want;
     let idx = alive
         .iter()
         .position(|(o, ..)| is(o, pinned))
-        .or_else(|| alive.iter().position(|(o, _, playing, _)| *playing && is(o, current)))
+        .or_else(|| {
+            alive
+                .iter()
+                .position(|(o, _, playing, _)| *playing && is(o, current))
+        })
         .or_else(|| alive.iter().position(|(_, _, playing, _)| *playing))
         .or_else(|| alive.iter().position(|(o, ..)| is(o, current)))
         .or((!alive.is_empty()).then_some(0));
-    let players = alive.iter().map(|(o, l, ..)| (o.clone(), l.clone())).collect();
+    let players = alive
+        .iter()
+        .map(|(o, l, ..)| (o.clone(), l.clone()))
+        .collect();
     (idx.map(|i| alive.swap_remove(i).3), players)
 }
 
@@ -161,7 +192,10 @@ pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
         let (ui, state) = (ui.clone(), state.clone());
         glib::spawn_future_local(async move {
             let url = art_url.clone();
-            let cover = gio::spawn_blocking(move || square_cover(&load_art(&url)?)).await.ok().flatten();
+            let cover = gio::spawn_blocking(move || square_cover(&load_art(&url)?))
+                .await
+                .ok()
+                .flatten();
             if let Some((_, _, _, rgb)) = &cover {
                 ui.accent.load_from_string(&ambient_css("tinted", *rgb));
             }
@@ -174,7 +208,8 @@ pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
                 } else {
                     gtk::gdk::MemoryFormat::R8g8b8
                 };
-                gtk::gdk::MemoryTexture::new(112, 112, format, &pixels, stride).upcast::<gtk::gdk::Texture>()
+                gtk::gdk::MemoryTexture::new(112, 112, format, &pixels, stride)
+                    .upcast::<gtk::gdk::Texture>()
             });
             ui.art.set_paintable(tex.as_ref());
             ui.mini_art.set_paintable(tex.as_ref());
@@ -191,7 +226,11 @@ pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
     ui.seek.set_range(0.0, len);
     if state.borrow().seeking.is_none() {
         ui.seek.set_value(pos_s);
-        ui.time.set_label(&format!("{} / {}", mmss(pos_s as i64), mmss(length_s.max(1))));
+        ui.time.set_label(&format!(
+            "{} / {}",
+            mmss(pos_s as i64),
+            mmss(length_s.max(1))
+        ));
     }
     ui.song_bar.set_fraction((pos_s / len).clamp(0.0, 1.0));
     ui.seek.parent().unwrap().set_visible(length_s > 0);
@@ -244,7 +283,11 @@ pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
                 for ((_, line), r) in lyrics.iter().zip(&rom) {
                     let item = gtk::Box::new(gtk::Orientation::Vertical, 1);
                     item.add_css_class("lrc");
-                    let text = if line.is_empty() { "♪" } else { line.as_str() };
+                    let text = if line.is_empty() {
+                        "♪"
+                    } else {
+                        line.as_str()
+                    };
                     let main = gtk::Label::builder()
                         .label(text)
                         .css_classes(["lrc-main"])
@@ -286,7 +329,11 @@ pub(crate) fn highlight_lyric(ui: &Ui, st: &mut State, idx: Option<usize>) {
     }
     let len = st.lyrics.len();
     for i in 0..len {
-        let Some(child) = ui.lyrics_list.row_at_index(i as i32).and_then(|r| r.child()) else {
+        let Some(child) = ui
+            .lyrics_list
+            .row_at_index(i as i32)
+            .and_then(|r| r.child())
+        else {
             continue;
         };
         for c in ["now", "near", "mid"] {
@@ -301,13 +348,42 @@ pub(crate) fn highlight_lyric(ui: &Ui, st: &mut State, idx: Option<usize>) {
             }
         }
     }
-    if let Some(new) = idx.and_then(|i| ui.lyrics_list.row_at_index(i as i32)).and_then(|r| r.child())
-        && let Some(b) = new.compute_bounds(&ui.lyrics_list)
-    {
-        let adj = ui.lyrics_scroll.vadjustment();
-        adj.set_value((b.y() as f64 + b.height() as f64 / 2.0 - adj.page_size() / 2.0).max(0.0));
-    }
+    center_lyric(ui, idx, ui.lyrics_rev.is_child_revealed());
     st.lyric_idx = idx;
+}
+
+/// Center `idx` inside `lyrics_scroll`, easing over 220 ms when `smooth` is true.
+pub(crate) fn center_lyric(ui: &Ui, idx: Option<usize>, smooth: bool) {
+    let Some(new) = idx
+        .and_then(|i| ui.lyrics_list.row_at_index(i as i32))
+        .and_then(|r| r.child())
+    else {
+        return;
+    };
+    let Some(b) = new.compute_bounds(&ui.lyrics_list) else {
+        return;
+    };
+    let adj = ui.lyrics_scroll.vadjustment();
+    let target = (b.y() as f64 + b.height() as f64 / 2.0 - adj.page_size() / 2.0).max(0.0);
+    if !smooth {
+        adj.set_value(target);
+        return;
+    }
+    let start = adj.value();
+    if (target - start).abs() < 1.0 {
+        return;
+    }
+    let t0 = std::time::Instant::now();
+    ui.lyrics_scroll.add_tick_callback(move |_, _| {
+        let p = (t0.elapsed().as_secs_f64() / 0.22).min(1.0);
+        let ease = 1.0 - (1.0 - p).powi(3);
+        adj.set_value(start + (target - start) * ease);
+        if p >= 1.0 {
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
 }
 
 /// Layered radial glow from the top-left cover position over a dark directional gradient,
@@ -320,6 +396,7 @@ pub(crate) fn ambient_css(class: &str, (r, g, b): (u8, u8, u8)) -> String {
     format!(
         ".notch.{class} {{ background: radial-gradient(circle at 44px 48px, rgba({gr},{gg},{gb},0.62) 0%, rgba({r},{g},{b},0.28) 46%, transparent 78%), linear-gradient(160deg, {} 0%, rgb({},{},{}) 58%, rgb({},{},{}) 100%); }} \
          .notch.{class} .eq > box, .notch.{class} progressbar.song-trace progress {{ background: rgb({hr},{hg},{hb}); }} \
+         .notch.{class} .lrc.now {{ border-left-color: rgb({hr},{hg},{hb}); }} \
          .notch.{class} .lrc.now .lrc-rom {{ color: rgb({hr},{hg},{hb}); }}",
         cfg().gradient[0],
         r / 4,
@@ -340,9 +417,18 @@ pub(crate) fn square_cover(bytes: &[u8]) -> Option<(glib::Bytes, bool, usize, (u
     let pb = loader.pixbuf()?;
     let side = pb.width().min(pb.height());
     let sq = pb
-        .new_subpixbuf((pb.width() - side) / 2, (pb.height() - side) / 2, side, side)
+        .new_subpixbuf(
+            (pb.width() - side) / 2,
+            (pb.height() - side) / 2,
+            side,
+            side,
+        )
         .scale_simple(112, 112, gtk::gdk_pixbuf::InterpType::Bilinear)?;
-    let (pixels, alpha, stride) = (sq.read_pixel_bytes(), sq.has_alpha(), sq.rowstride() as usize);
+    let (pixels, alpha, stride) = (
+        sq.read_pixel_bytes(),
+        sq.has_alpha(),
+        sq.rowstride() as usize,
+    );
     let accent = accent_color(&pixels, if alpha { 4 } else { 3 }, stride, 112);
     Some((pixels, alpha, stride, accent))
 }
@@ -372,7 +458,11 @@ pub(crate) fn accent_color(px: &[u8], channels: usize, stride: usize, size: usiz
 pub(crate) fn load_art(url: &str) -> Option<Vec<u8>> {
     if url.starts_with("http") {
         let mut resp = ureq::get(url).call().ok()?;
-        resp.body_mut().with_config().limit(10 << 20).read_to_vec().ok()
+        resp.body_mut()
+            .with_config()
+            .limit(10 << 20)
+            .read_to_vec()
+            .ok()
     } else {
         std::fs::read(gio::File::for_uri(url).path()?).ok()
     }

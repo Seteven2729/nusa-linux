@@ -46,17 +46,17 @@ Warna notch ikut cover lagu saat musik diputar, dan ikut wallpaper saat idle. Se
 
 - Lagu yang sedang diputar dari player MPRIS mana pun (Spotify, Strawberry, browser, mpv): cover, judul, artis, prev/play/next, seek bar, dan garis tipis progres lagu saat notch tertutup
 - Warna gradien dan pendaran radial mengikuti warna cover lagu, dan saat idle mengikuti warna wallpaper Plasma
-- Lirik tersinkron dari [lrclib.net](https://lrclib.net), satu baris di bawah player (atau di bawah judul saat notch tertutup), atau panel lirik penuh dengan sorotan bertingkat (klik baris untuk lompat)
+- Lirik tersinkron dari [lrclib.net](https://lrclib.net), satu baris di bawah player (atau di bawah judul saat notch tertutup), atau panel lirik penuh yang meluncur di sisi kanan dengan garis aksen aktif, sorotan bertingkat, dan gulir otomatis halus (klik baris untuk lompat)
 - Romanisasi lirik untuk Korea, Jepang (termasuk kanji), Mandarin (pinyin), dan Cyrillic
 - Popup charger dicolok/dicabut, Wi-Fi tersambung/putus, headphone Bluetooth tersambung beserta baterainya
 - Titik oranye saat mikrofon dipakai, hijau saat kamera menyala, merah saat layar sedang di-share
-- Progres download (browser dan aplikasi lain yang memakai Unity LauncherEntry): bar tipis di notch, lalu popup saat selesai. Halaman Download menampilkan semua download yang berjalan dan 4 file terbaru di folder Download (klik untuk membuka).
+- Progres download (browser lewat Unity LauncherEntry maupun pemantauan `~/Downloads` langsung): bar tipis di notch, lalu popup saat selesai. Halaman Download menampilkan semua download yang berjalan dan 4 file terbaru di folder Download (klik untuk membuka).
 - Notifikasi HP lewat KDE Connect, termasuk telepon masuk
 - Maskot mata saat idle: muncul setelah 30 detik, tertidur setelah 3 menit, tersenyum saat kamu kembali. Kalau musik sedang jalan, maskot tersenyum dan mengangguk-angguk. Kalau di-pause, matanya mengantuk.
 - Halaman Home: jam besar, tanggal (bahasa Indonesia atau Inggris), bar CPU/RAM/suhu (berubah oranye saat beban atau suhu tinggi), dan timer hitung mundur cepat (tombol `−`/`+`, scroll, atau ketik durasi seperti `10`, `45s`, `1:30` lalu Enter; tampil di notch tertutup saat berjalan dan memunculkan popup saat selesai)
-- Tombol clipboard di halaman Home: membuka 3 isi clipboard terakhir (klik untuk copy ulang). Panel tertutup lagi setiap notch ditutup. Tombol QR di tiap item menampilkan isinya sebagai kode QR untuk dipindai HP (maksimal 500 karakter).
+- Tombol clipboard di halaman Home: membuka 3 isi clipboard terakhir dengan animasi geser ke samping (klik untuk copy ulang). Panel tertutup lagi setiap notch ditutup. Tombol QR di tiap item menggeser panel ke kode QR untuk dipindai HP (maksimal 500 karakter).
 - Halaman Screenshots: 5 screenshot terbaru dari `~/Pictures/Screenshots`. Seret thumbnail ke aplikasi lain, klik untuk membuka, × untuk menyembunyikan dari daftar (file tidak dihapus). Setiap screenshot baru memunculkan thumbnail sebentar di notch.
-- Halaman Mixer: volume output dan slider plus tombol bisu untuk setiap aplikasi yang sedang memutar suara
+- Halaman Mixer: slider volume dan tombol bisu untuk output utama maupun untuk setiap aplikasi yang sedang memutar suara
 - Kalau ada lebih dari satu player (misalnya Strawberry dan browser), tombol `⇄` di halaman Media memilih player yang dikontrol. Pilihan itu bertahan sampai player-nya ditutup.
 - Tema warna (`nusa`, `midnight`, `rose`, `forest`, atau `custom`) dan bahasa tampilan (Indonesia atau Inggris)
 - Menu tray: start with login, minimal notch (garis tipis), maskot, tema, edit settings, reload, exit

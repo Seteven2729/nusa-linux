@@ -3,7 +3,9 @@ use gtk::{gio, glib, prelude::*};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use std::path::PathBuf;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
-use zbus::{Connection, MatchRule, MessageStream, ObjectPath, OwnedObjectPath, OwnedVariant, proxy};
+use zbus::{
+    Connection, MatchRule, MessageStream, ObjectPath, OwnedObjectPath, OwnedVariant, proxy,
+};
 
 mod capture;
 mod config;
@@ -17,7 +19,10 @@ mod style;
 mod system;
 mod tray;
 
-use {capture::*, config::*, dbus::*, lyrics::*, mascot::*, media::*, mixer::*, screenshots::*, style::*, system::*, tray::*};
+use {
+    capture::*, config::*, dbus::*, lyrics::*, mascot::*, media::*, mixer::*, screenshots::*,
+    style::*, system::*, tray::*,
+};
 
 #[derive(Clone)]
 struct Ui {
@@ -29,6 +34,7 @@ struct Ui {
     art: gtk::Image,
     eq: gtk::Box,
     lyric: gtk::Label,
+    lyric_rev: gtk::Revealer,
     expanded: gtk::Revealer,
     title: gtk::Label,
     artist: gtk::Label,
@@ -38,6 +44,7 @@ struct Ui {
     lyrics_btn: gtk::ToggleButton,
     lyrics_list: gtk::ListBox,
     lyrics_scroll: gtk::ScrolledWindow,
+    lyrics_rev: gtk::Revealer,
     lyric_rom: gtk::Label,
     mic: gtk::Label,
     cam: gtk::Label,
@@ -50,6 +57,8 @@ struct Ui {
     timer_badge: gtk::Label,
     song_bar: gtk::ProgressBar,
     clips: gtk::Box,
+    clip_stack: gtk::Stack,
+    clips_rev: gtk::Revealer,
     clip_btn: gtk::ToggleButton,
     accent: gtk::CssProvider,
     wall: gtk::CssProvider,
@@ -69,7 +78,6 @@ struct Ui {
     shots_row: gtk::Box,
     /// Screenshot thumbnail shown next to the "saved" alert.
     shot_thumb: gtk::Image,
-    qr_view: gtk::Box,
     qr_pic: gtk::Picture,
     pager: gtk::Box,
     top_row: gtk::Revealer,
@@ -185,7 +193,10 @@ fn build_ui(app: &gtk::Application) {
         .build();
     // gtk::Image draws at a fixed pixel size; gtk::Picture would ask for the cover's full resolution.
     let picture = |size: i32, class: &str| {
-        let p = gtk::Image::builder().pixel_size(size).css_classes([class]).build();
+        let p = gtk::Image::builder()
+            .pixel_size(size)
+            .css_classes([class])
+            .build();
         p.set_overflow(gtk::Overflow::Hidden);
         p.set_valign(gtk::Align::Center);
         p
@@ -222,10 +233,22 @@ fn build_ui(app: &gtk::Application) {
         glib::ControlFlow::Continue
     });
     // Orange dot while any app records from the microphone.
-    let mic = gtk::Label::builder().label("●").css_classes(["mic"]).visible(false).build();
+    let mic = gtk::Label::builder()
+        .label("●")
+        .css_classes(["mic"])
+        .visible(false)
+        .build();
     // Green while a camera is on, red while the screen is shared, as on phones.
-    let cam = gtk::Label::builder().label("●").css_classes(["cam"]).visible(false).build();
-    let share = gtk::Label::builder().label("●").css_classes(["share"]).visible(false).build();
+    let cam = gtk::Label::builder()
+        .label("●")
+        .css_classes(["cam"])
+        .visible(false)
+        .build();
+    let share = gtk::Label::builder()
+        .label("●")
+        .css_classes(["share"])
+        .visible(false)
+        .build();
     let top = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     top.append(&share);
     top.append(&cam);
@@ -289,7 +312,10 @@ fn build_ui(app: &gtk::Application) {
     text.append(&title);
     text.append(&artist);
     let lyrics_btn = gtk::ToggleButton::builder()
-        .icon_name(first_icon(&["view-media-lyrics-symbolic", "format-justify-left-symbolic"]))
+        .icon_name(first_icon(&[
+            "view-media-lyrics-symbolic",
+            "format-justify-left-symbolic",
+        ]))
         .tooltip_text(tr("Lirik", "Lyrics"))
         .css_classes(["panel-toggle"])
         .valign(gtk::Align::Center)
@@ -333,8 +359,14 @@ fn build_ui(app: &gtk::Application) {
 
     // Home page: editorial asymmetric clock + date on the left, horizontal micro-meters on the right,
     // and quick timer + clipboard pills below.
-    let clock = gtk::Label::builder().css_classes(["title", "clock"]).xalign(0.0).build();
-    let date = gtk::Label::builder().css_classes(["artist"]).xalign(0.0).build();
+    let clock = gtk::Label::builder()
+        .css_classes(["title", "clock"])
+        .xalign(0.0)
+        .build();
+    let date = gtk::Label::builder()
+        .css_classes(["artist"])
+        .xalign(0.0)
+        .build();
     let clock_box = gtk::Box::new(gtk::Orientation::Vertical, 1);
     clock_box.set_valign(gtk::Align::Center);
     clock_box.set_hexpand(true);
@@ -352,9 +384,19 @@ fn build_ui(app: &gtk::Application) {
             .valign(gtk::Align::Center)
             .build()
     });
-    let stat_vals = std::array::from_fn(|_| gtk::Label::builder().css_classes(["stat-val"]).xalign(1.0).width_chars(4).build());
+    let stat_vals = std::array::from_fn(|_| {
+        gtk::Label::builder()
+            .css_classes(["stat-val"])
+            .xalign(1.0)
+            .width_chars(4)
+            .build()
+    });
     for (row, name) in ["CPU", "RAM", "TMP"].into_iter().enumerate() {
-        let lbl = gtk::Label::builder().label(name).css_classes(["stat-lbl"]).xalign(0.0).build();
+        let lbl = gtk::Label::builder()
+            .label(name)
+            .css_classes(["stat-lbl"])
+            .xalign(0.0)
+            .build();
         stats_box.attach(&lbl, 0, row as i32, 1, 1);
         stats_box.attach(&stat_bars[row], 1, row as i32, 1, 1);
         stats_box.attach(&stat_vals[row], 2, row as i32, 1, 1);
@@ -407,7 +449,6 @@ fn build_ui(app: &gtk::Application) {
     let clips = gtk::Box::new(gtk::Orientation::Vertical, 4);
     clips.set_width_request(260);
     clips.set_valign(gtk::Align::Start);
-    clips.set_visible(false);
     // Full lyrics sit to the right of the player when the lyrics button is on.
     let lyrics_list = gtk::ListBox::new();
     lyrics_list.set_selection_mode(gtk::SelectionMode::None);
@@ -417,18 +458,48 @@ fn build_ui(app: &gtk::Application) {
         // min-content-width is ignored without a horizontal scrollbar, so size it directly.
         .width_request(260)
         .height_request(150)
+        .margin_start(16)
+        .build();
+    let lyrics_rev = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::SlideRight)
+        .transition_duration(220)
+        .child(&lyrics_scroll)
         .visible(false)
         .build();
+    lyrics_rev.connect_child_revealed_notify(|r| {
+        if !r.is_child_revealed() && !r.reveals_child() {
+            r.set_visible(false);
+        }
+    });
     // Downloads page: everything in progress, then the newest files in ~/Downloads.
-    let section = |text: &str| gtk::Label::builder().label(text).css_classes(["section"]).xalign(0.0).build();
+    let section = |text: &str| {
+        gtk::Label::builder()
+            .label(text)
+            .css_classes(["section"])
+            .xalign(0.0)
+            .build()
+    };
     let dl_active = gtk::Box::new(gtk::Orientation::Vertical, 6);
     let dl_recent = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    let open_row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    open_row.set_halign(gtk::Align::Center);
+    open_row.append(&gtk::Image::from_icon_name(first_icon(&[
+        "folder-open-symbolic",
+        "folder-download-symbolic",
+    ])));
+    open_row.append(&gtk::Label::new(Some(tr(
+        "Buka folder Download",
+        "Open Downloads folder",
+    ))));
     let open_folder = gtk::Button::builder()
-        .label(tr("📂  Buka folder Download", "📂  Open Downloads folder"))
+        .child(&open_row)
         .css_classes(["clip"])
         .build();
     open_folder.connect_clicked(|_| {
-        let _ = gio::AppInfo::launch_default_for_uri(&gio::File::for_path(downloads_dir()).uri(), None::<&gio::AppLaunchContext>);
+        let _ = gio::AppInfo::launch_default_for_uri(
+            &gio::File::for_path(downloads_dir()).uri(),
+            None::<&gio::AppLaunchContext>,
+        );
     });
     let downloads_page = gtk::Box::new(gtk::Orientation::Vertical, 8);
     downloads_page.set_width_request(300);
@@ -437,11 +508,14 @@ fn build_ui(app: &gtk::Application) {
     downloads_page.append(&section(tr("Terbaru di Downloads", "Latest in Downloads")));
     downloads_page.append(&dl_recent);
     downloads_page.append(&open_folder);
-    let media_page = gtk::Box::new(gtk::Orientation::Horizontal, 16);
+    let media_page = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     media_page.append(&body);
-    media_page.append(&lyrics_scroll);
+    media_page.append(&lyrics_rev);
     // QR of one clipboard item, replacing the list until clicked.
-    let qr_pic = gtk::Picture::builder().can_shrink(false).halign(gtk::Align::Center).build();
+    let qr_pic = gtk::Picture::builder()
+        .can_shrink(false)
+        .halign(gtk::Align::Center)
+        .build();
     let qr_view = gtk::Box::new(gtk::Orientation::Vertical, 6);
     qr_view.append(&qr_pic);
     qr_view.append(
@@ -453,15 +527,34 @@ fn build_ui(app: &gtk::Application) {
             .css_classes(["time"])
             .build(),
     );
-    qr_view.set_visible(false);
+    let clip_stack = gtk::Stack::builder()
+        .transition_type(gtk::StackTransitionType::SlideLeftRight)
+        .transition_duration(180)
+        .interpolate_size(true)
+        .hhomogeneous(false)
+        .vhomogeneous(false)
+        .margin_start(16)
+        .build();
+    clip_stack.add_named(&clips, Some("list"));
+    clip_stack.add_named(&qr_view, Some("qr"));
     let back = gtk::GestureClick::new();
-    let q = qr_view.clone();
-    back.connect_released(move |_, _, _, _| q.set_visible(false));
+    let cs = clip_stack.clone();
+    back.connect_released(move |_, _, _, _| cs.set_visible_child_name("list"));
     qr_view.add_controller(back);
-    let home_page = gtk::Box::new(gtk::Orientation::Horizontal, 16);
+    let clips_rev = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::SlideRight)
+        .transition_duration(220)
+        .child(&clip_stack)
+        .visible(false)
+        .build();
+    clips_rev.connect_child_revealed_notify(|r| {
+        if !r.is_child_revealed() && !r.reveals_child() {
+            r.set_visible(false);
+        }
+    });
+    let home_page = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     home_page.append(&home_body);
-    home_page.append(&clips);
-    home_page.append(&qr_view);
+    home_page.append(&clips_rev);
     // Pages slide sideways, and the notch eases to the new page's size instead of jumping.
     let pages = gtk::Stack::builder()
         .transition_type(gtk::StackTransitionType::SlideLeftRight)
@@ -520,7 +613,10 @@ fn build_ui(app: &gtk::Application) {
     let page_pills: Vec<(&'static str, gtk::Button)> = page_order()
         .into_iter()
         .map(|id| {
-            let b = gtk::Button::builder().label(page_label(id)).css_classes(["page-pill"]).build();
+            let b = gtk::Button::builder()
+                .label(page_label(id))
+                .css_classes(["page-pill"])
+                .build();
             nav_bar.append(&b);
             (id, b)
         })
@@ -553,14 +649,36 @@ fn build_ui(app: &gtk::Application) {
         .hexpand(true)
         .valign(gtk::Align::Center)
         .build();
-    let dl_row = gtk::Box::builder().spacing(6).css_classes(["dl-row"]).visible(false).build();
+    let dl_row = gtk::Box::builder()
+        .spacing(6)
+        .css_classes(["dl-row"])
+        .visible(false)
+        .build();
     let dl_icon = first_icon(&["download-symbolic", "folder-download-symbolic"]);
-    dl_row.append(&gtk::Image::builder().icon_name(dl_icon).pixel_size(12).build());
+    dl_row.append(
+        &gtk::Image::builder()
+            .icon_name(dl_icon)
+            .pixel_size(12)
+            .build(),
+    );
     dl_row.append(&dl_bar);
+    let lyric_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    lyric_box.append(&lyric);
+    lyric_box.append(&lyric_rom);
+    let lyric_rev = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::SlideDown)
+        .transition_duration(180)
+        .child(&lyric_box)
+        .visible(false)
+        .build();
+    lyric_rev.connect_child_revealed_notify(|r| {
+        if !r.is_child_revealed() && !r.reveals_child() {
+            r.set_visible(false);
+        }
+    });
     notch.append(&dl_row);
     notch.append(&expanded);
-    notch.append(&lyric);
-    notch.append(&lyric_rom);
+    notch.append(&lyric_rev);
     let song_bar = gtk::ProgressBar::builder()
         .css_classes(["song-trace"])
         .hexpand(true)
@@ -578,6 +696,7 @@ fn build_ui(app: &gtk::Application) {
         art,
         eq,
         lyric,
+        lyric_rev,
         expanded,
         title,
         artist,
@@ -587,6 +706,7 @@ fn build_ui(app: &gtk::Application) {
         lyrics_btn,
         lyrics_list,
         lyrics_scroll,
+        lyrics_rev,
         lyric_rom,
         mic,
         cam,
@@ -599,6 +719,8 @@ fn build_ui(app: &gtk::Application) {
         timer_badge,
         song_bar,
         clips,
+        clip_stack,
+        clips_rev,
         clip_btn,
         accent: gtk::CssProvider::new(),
         wall: gtk::CssProvider::new(),
@@ -616,7 +738,6 @@ fn build_ui(app: &gtk::Application) {
         mixer_box,
         shots_row,
         shot_thumb,
-        qr_view,
         qr_pic,
         pager,
         top_row,
@@ -672,9 +793,17 @@ fn build_ui(app: &gtk::Application) {
         draw_eyes(cr, w as f64, h as f64, st.mood, st.blink, music);
     });
     let (u, s) = (ui.clone(), state.clone());
-    ui.lyrics_btn.connect_toggled(move |_| refresh_compact(&u, &s.borrow()));
+    ui.lyrics_rev.connect_child_revealed_notify(move |r| {
+        if r.is_child_revealed() {
+            center_lyric(&u, s.borrow().lyric_idx, false);
+        }
+    });
     let (u, s) = (ui.clone(), state.clone());
-    ui.clip_btn.connect_toggled(move |_| refresh_compact(&u, &s.borrow()));
+    ui.lyrics_btn
+        .connect_toggled(move |_| refresh_compact(&u, &s.borrow()));
+    let (u, s) = (ui.clone(), state.clone());
+    ui.clip_btn
+        .connect_toggled(move |_| refresh_compact(&u, &s.borrow()));
     let s = state.clone();
     ui.lyrics_list.connect_row_activated(move |_, row| {
         let ms = s.borrow().lyrics.get(row.index() as usize).map(|l| l.0);
@@ -733,7 +862,11 @@ fn build_ui(app: &gtk::Application) {
             if let Some(p) = p {
                 let next = ax > 0.0;
                 glib::spawn_future_local(async move {
-                    let _ = if next { p.next().await } else { p.previous().await };
+                    let _ = if next {
+                        p.next().await
+                    } else {
+                        p.previous().await
+                    };
                 });
             }
             ax = 0.0;
@@ -773,7 +906,10 @@ fn build_ui(app: &gtk::Application) {
     let s = state.clone();
     ui.player_btn.connect_clicked(move |_| {
         let mut st = s.borrow_mut();
-        let current = st.player.as_ref().map(|p| p.inner().destination().to_string());
+        let current = st
+            .player
+            .as_ref()
+            .map(|p| p.inner().destination().to_string());
         let i = st
             .players
             .iter()
@@ -875,7 +1011,8 @@ fn build_ui(app: &gtk::Application) {
             if st.timer_rem > 0 {
                 st.timer_rem = 0;
             } else {
-                let secs = parse_timer_secs(&u.timer_entry.text()).unwrap_or(st.timer_mins.max(1) * 60);
+                let secs =
+                    parse_timer_secs(&u.timer_entry.text()).unwrap_or(st.timer_mins.max(1) * 60);
                 st.timer_rem = secs;
                 st.timer_mins = secs.div_ceil(60).max(1);
             }
@@ -920,7 +1057,8 @@ fn build_ui(app: &gtk::Application) {
                     "home"
                 }
             };
-            u1.pages.set_visible_child_full(page, gtk::StackTransitionType::None);
+            u1.pages
+                .set_visible_child_full(page, gtk::StackTransitionType::None);
             set_open(&u1, &s1, true);
         }
     });
@@ -976,8 +1114,11 @@ fn build_ui(app: &gtk::Application) {
     ui.seek.connect_change_value(move |_, _, secs| {
         if pressed.get() {
             s.borrow_mut().seeking = Some(secs);
-            u.time
-                .set_label(&format!("{} / {}", mmss(secs as i64), mmss(u.seek.adjustment().upper() as i64)));
+            u.time.set_label(&format!(
+                "{} / {}",
+                mmss(secs as i64),
+                mmss(u.seek.adjustment().upper() as i64)
+            ));
         } else {
             seek_to(&s, secs);
         }
@@ -1019,11 +1160,19 @@ fn build_ui(app: &gtk::Application) {
             }
         };
         if finished {
-            show_alert_for(&u, &s, tr("⏱  Timer selesai!", "⏱  Timer finished!").into(), 5);
+            show_alert_for(
+                &u,
+                &s,
+                tr("⏱  Timer selesai!", "⏱  Timer finished!").into(),
+                5,
+            );
         } else {
             refresh_compact(&u, &s.borrow());
         }
-        if u.stats_box.is_visible() && u.expanded.reveals_child() && u.pages.visible_child_name().as_deref() == Some("home") {
+        if u.stats_box.is_visible()
+            && u.expanded.reveals_child()
+            && u.pages.visible_child_name().as_deref() == Some("home")
+        {
             update_stats(&u, &mut s.borrow_mut().cpu_prev);
         }
         glib::ControlFlow::Continue
@@ -1039,16 +1188,24 @@ fn build_ui(app: &gtk::Application) {
             glib::spawn_future_local(async move {
                 if let Ok(us) = p.position().await {
                     let line = current_line(&s.borrow().lyrics, us / 1000).unwrap_or_default();
-                    u.lyric.set_label(&line);
                     let idx = current_index(&s.borrow().lyrics, us / 1000);
                     let rom = idx.and_then(|i| s.borrow().lyrics_rom.get(i).cloned().flatten());
+                    if u.lyric.label() != line && !line.is_empty() {
+                        retrigger(&u.lyric, "fade", 250);
+                        retrigger(&u.lyric_rom, "fade", 250);
+                    }
+                    u.lyric.set_label(&line);
                     u.lyric_rom.set_label(rom.as_deref().unwrap_or_default());
                     highlight_lyric(&u, &mut s.borrow_mut(), idx);
                     let secs = us as f64 / 1e6;
                     let upper = u.seek.adjustment().upper().max(1.0);
                     u.seek.set_value(secs);
                     u.song_bar.set_fraction((secs / upper).clamp(0.0, 1.0));
-                    u.time.set_label(&format!("{} / {}", mmss(us / 1_000_000), mmss(upper as i64)));
+                    u.time.set_label(&format!(
+                        "{} / {}",
+                        mmss(us / 1_000_000),
+                        mmss(upper as i64)
+                    ));
                 }
             });
         }
@@ -1141,7 +1298,8 @@ fn demo(ui: &Ui, state: &Shared) {
                     if page == "home" && cfg().stats {
                         update_stats(&ui, &mut state.borrow_mut().cpu_prev);
                     }
-                    ui.pages.set_visible_child_full(page, gtk::StackTransitionType::None);
+                    ui.pages
+                        .set_visible_child_full(page, gtk::StackTransitionType::None);
                     set_open(&ui, &state, true);
                 }
                 Some(("alert", text)) => show_alert_for(&ui, &state, text.into(), 30),
@@ -1155,7 +1313,8 @@ fn demo(ui: &Ui, state: &Shared) {
         // Panels need the open notch, which set_open reveals after its widen step.
         let (u, s, spec) = (ui.clone(), state.clone(), spec.clone());
         glib::timeout_add_local_once(Duration::from_millis(600), move || {
-            u.lyrics_btn.set_active(spec.split(',').any(|o| o == "lyrics"));
+            u.lyrics_btn
+                .set_active(spec.split(',').any(|o| o == "lyrics"));
             u.clip_btn.set_active(spec.split(',').any(|o| o == "clips"));
             refresh_compact(&u, &s.borrow());
         });
@@ -1193,18 +1352,48 @@ fn refresh_compact(ui: &Ui, st: &State) {
     let on_media = page.as_deref() == Some("media");
     let full_lyrics = open && on_media && has_lyrics && ui.lyrics_btn.is_active();
     ui.lyrics_btn.set_visible(has_lyrics);
-    ui.lyrics_scroll.set_visible(full_lyrics);
-    ui.lyric
-        .set_visible(st.playing && !st.lyrics.is_empty() && st.alert.is_none() && !full_lyrics);
+    if full_lyrics {
+        ui.lyrics_rev.set_visible(true);
+        ui.lyrics_rev.set_reveal_child(true);
+    } else {
+        ui.lyrics_rev.set_reveal_child(false);
+        if !ui.lyrics_rev.is_child_revealed() {
+            ui.lyrics_rev.set_visible(false);
+        }
+    }
+    let show_lyric = st.playing
+        && !st.lyrics.is_empty()
+        && st.alert.is_none()
+        && (!open || (on_media && !full_lyrics));
+    ui.lyric.set_visible(true);
     ui.lyric_rom
-        .set_visible(ui.lyric.is_visible() && st.lyrics_rom.iter().any(Option::is_some));
+        .set_visible(st.lyrics_rom.iter().any(Option::is_some));
+    if show_lyric {
+        ui.lyric_rev.set_visible(true);
+        ui.lyric_rev.set_reveal_child(true);
+    } else {
+        ui.lyric_rev.set_reveal_child(false);
+        if !ui.lyric_rev.is_child_revealed() {
+            ui.lyric_rev.set_visible(false);
+        }
+    }
     ui.stats_box.set_visible(cfg().stats);
     let has_clips = ui.clips.first_child().is_some();
     ui.clip_btn.set_visible(has_clips);
-    ui.clips
-        .set_visible(open && !on_media && has_clips && ui.clip_btn.is_active() && !ui.qr_view.is_visible());
+    let show_clips = open && !on_media && has_clips && ui.clip_btn.is_active();
+    if show_clips {
+        ui.clips_rev.set_visible(true);
+        ui.clips_rev.set_reveal_child(true);
+    } else {
+        ui.clip_stack.set_visible_child_name("list");
+        ui.clips_rev.set_reveal_child(false);
+        if !ui.clips_rev.is_child_revealed() {
+            ui.clips_rev.set_visible(false);
+        }
+    }
     ui.shot_thumb.set_paintable(st.alert_thumb.as_ref());
-    ui.shot_thumb.set_visible(st.alert.is_some() && st.alert_thumb.is_some());
+    ui.shot_thumb
+        .set_visible(st.alert.is_some() && st.alert_thumb.is_some());
     for (id, btn) in &ui.page_pills {
         if page.as_deref() == Some(*id) {
             btn.add_css_class("active");
@@ -1258,13 +1447,14 @@ fn refresh_compact(ui: &Ui, st: &State) {
     ui.compact.set_visible(!mascot);
     let media = st.playing && st.alert.is_none();
     ui.eq.set_visible(media);
-    ui.mini_art.set_visible(media && !mascot && ui.mini_art.paintable().is_some());
+    ui.mini_art
+        .set_visible(media && !mascot && ui.mini_art.paintable().is_some());
     if ui.expanded.reveals_child() {
         ui.notch.add_css_class("open");
     } else {
         ui.notch.remove_css_class("open");
     }
-    let thin = !open && !show_compact && !ui.lyric.is_visible();
+    let thin = !open && !show_compact && !show_lyric;
     ui.song_bar
         .set_visible(!open && media && !thin && ui.seek.adjustment().upper() > 1.0);
     // While music plays the closed notch keeps one width, so long titles and each new lyric
@@ -1281,7 +1471,10 @@ fn refresh_compact(ui: &Ui, st: &State) {
         label.set_max_width_chars(if fixed { 1 } else { chars });
     }
     // Player switch: name of the one in control, only when there is a choice.
-    let current = st.player.as_ref().map(|p| p.inner().destination().to_string());
+    let current = st
+        .player
+        .as_ref()
+        .map(|p| p.inner().destination().to_string());
     let name = st
         .players
         .iter()
@@ -1299,9 +1492,13 @@ fn refresh_compact(ui: &Ui, st: &State) {
     }
     // Home page clock.
     let now = glib::DateTime::now_local().ok();
-    ui.clock
-        .set_label(&now.as_ref().and_then(|d| d.format("%H:%M").ok()).unwrap_or_default());
-    ui.date.set_label(&now.as_ref().map(tanggal).unwrap_or_default());
+    ui.clock.set_label(
+        &now.as_ref()
+            .and_then(|d| d.format("%H:%M").ok())
+            .unwrap_or_default(),
+    );
+    ui.date
+        .set_label(&now.as_ref().map(tanggal).unwrap_or_default());
 }
 
 /// Open or close the notch without the width ever jumping.
@@ -1321,19 +1518,26 @@ fn set_open(ui: &Ui, state: &Shared, open: bool) {
         ui.pager.set_visible(true);
         let (_, natural, _, _) = ui.pager.measure(gtk::Orientation::Horizontal, -1);
         ui.pager.set_visible(false);
-        ui.width_css.load_from_string(&format!(".notch {{ min-width: {natural}px; }}"));
+        ui.width_css
+            .load_from_string(&format!(".notch {{ min-width: {natural}px; }}"));
         let (u, s) = (ui.clone(), state.clone());
         glib::timeout_add_local_once(Duration::from_millis(170), move || {
             if u.anim.get() == seq {
                 u.pager.set_visible(true);
                 u.expanded.set_reveal_child(true);
+                u.width_css.load_from_string("");
                 refresh_compact(&u, &s.borrow());
             }
         });
     } else {
+        if ui.pager.is_visible() {
+            let (_, natural, _, _) = ui.pager.measure(gtk::Orientation::Horizontal, -1);
+            ui.width_css
+                .load_from_string(&format!(".notch {{ min-width: {natural}px; }}"));
+        }
         ui.expanded.set_reveal_child(false);
         ui.clip_btn.set_active(false);
-        ui.qr_view.set_visible(false);
+        ui.clip_stack.set_visible_child_name("list");
         if !ui.expanded.is_child_revealed() {
             // Closed during the widen phase: nothing to slide up, narrow right away.
             ui.pager.set_visible(false);
@@ -1362,7 +1566,11 @@ fn page_order() -> Vec<&'static str> {
 /// (A multi-name GIcon would stop at the first theme holding any of them, often the fallback.)
 fn first_icon(names: &[&'static str]) -> &'static str {
     let theme = gtk::IconTheme::for_display(&gtk::gdk::Display::default().unwrap());
-    names.iter().copied().find(|n| theme.has_icon(n)).unwrap_or(names[names.len() - 1])
+    names
+        .iter()
+        .copied()
+        .find(|n| theme.has_icon(n))
+        .unwrap_or(names[names.len() - 1])
 }
 
 /// Restart a one-shot CSS animation by toggling its class.
@@ -1397,7 +1605,9 @@ fn show_alert_for(ui: &Ui, state: &Shared, text: String, secs: u32) {
     });
 }
 
-const HARI: [&str; 7] = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"];
+const HARI: [&str; 7] = [
+    "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu",
+];
 const BULAN: [&str; 12] = [
     "Januari",
     "Februari",
@@ -1412,7 +1622,15 @@ const BULAN: [&str; 12] = [
     "November",
     "Desember",
 ];
-const DAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const DAYS: [&str; 7] = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+];
 const MONTHS: [&str; 12] = [
     "January",
     "February",
@@ -1434,8 +1652,15 @@ fn tanggal(d: &glib::DateTime) -> String {
 }
 
 fn format_date(d: &glib::DateTime, english: bool) -> String {
-    let (days, months) = if english { (DAYS, MONTHS) } else { (HARI, BULAN) };
-    let (day, month) = (days[d.day_of_week() as usize - 1], months[d.month() as usize - 1]);
+    let (days, months) = if english {
+        (DAYS, MONTHS)
+    } else {
+        (HARI, BULAN)
+    };
+    let (day, month) = (
+        days[d.day_of_week() as usize - 1],
+        months[d.month() as usize - 1],
+    );
     format!("{day}, {} {month} {}", d.day_of_month(), d.year())
 }
 
