@@ -1,20 +1,20 @@
 use futures_util::StreamExt;
 use gtk::{gio, glib, prelude::*};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
-use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 use std::path::PathBuf;
-use zbus::{proxy, Connection, MatchRule, MessageStream, ObjectPath, OwnedObjectPath, OwnedVariant};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
+use zbus::{Connection, MatchRule, MessageStream, ObjectPath, OwnedObjectPath, OwnedVariant, proxy};
 
 mod capture;
 mod config;
 mod dbus;
-mod style;
-mod media;
 mod lyrics;
-mod system;
 mod mascot;
+mod media;
 mod mixer;
 mod screenshots;
+mod style;
+mod system;
 mod tray;
 
 use {capture::*, config::*, dbus::*, lyrics::*, mascot::*, media::*, mixer::*, screenshots::*, style::*, system::*, tray::*};
@@ -42,17 +42,22 @@ struct Ui {
     mic: gtk::Label,
     cam: gtk::Label,
     share: gtk::Label,
-    stats: gtk::Label,
+    stats_box: gtk::Grid,
+    stat_bars: [gtk::ProgressBar; 3],
+    stat_vals: [gtk::Label; 3],
+    timer_entry: gtk::Entry,
+    timer_btn: gtk::Button,
+    timer_badge: gtk::Label,
+    song_bar: gtk::ProgressBar,
     clips: gtk::Box,
     clip_btn: gtk::ToggleButton,
     accent: gtk::CssProvider,
     wall: gtk::CssProvider,
     dl_bar: gtk::ProgressBar,
     dl_row: gtk::Box,
-    /// Open view has two pages: "home" (clock, stats, clipboard) and "media" (player).
+    /// Open view pages: "home", "media", "mixer", "downloads", "screenshots".
     pages: gtk::Stack,
-    page_prev: gtk::Button,
-    page_next: gtk::Button,
+    page_pills: Vec<(&'static str, gtk::Button)>,
     clock: gtk::Label,
     date: gtk::Label,
     no_media: gtk::Label,
@@ -135,6 +140,12 @@ struct State {
     repick: Option<async_channel::Sender<()>>,
     /// Every download in progress, by app, for the downloads page.
     downloads: Vec<(String, f64)>,
+    /// Remaining countdown seconds for the quick timer (0 when stopped).
+    timer_rem: u32,
+    /// Preset minutes for the quick timer (1..=180).
+    timer_mins: u32,
+    /// True while the user is actively typing into `timer_entry`.
+    editing_timer: bool,
 }
 
 type Shared = Rc<RefCell<State>>;
@@ -191,7 +202,11 @@ fn build_ui(app: &gtk::Application) {
         bar.set_valign(gtk::Align::Center);
         eq.append(&bar);
     }
-    let mascot = gtk::DrawingArea::builder().content_width(44).content_height(16).visible(false).build();
+    let mascot = gtk::DrawingArea::builder()
+        .content_width(44)
+        .content_height(16)
+        .visible(false)
+        .build();
     mascot.set_hexpand(true);
     // Bars jump to random heights 4x a second. A CSS animation looked smoother but redrew
     // at 60 fps, which cost ~4% CPU for the whole time music played.
@@ -215,11 +230,21 @@ fn build_ui(app: &gtk::Application) {
     top.append(&share);
     top.append(&cam);
     top.append(&mic);
-    let shot_thumb = gtk::Image::builder().pixel_size(28).css_classes(["mini-art"]).visible(false).build();
+    let shot_thumb = gtk::Image::builder()
+        .pixel_size(28)
+        .css_classes(["mini-art"])
+        .visible(false)
+        .build();
     top.append(&shot_thumb);
     top.append(&mini_art);
     top.append(&compact);
     top.append(&mascot);
+    let timer_badge = gtk::Label::builder()
+        .css_classes(["timer-badge"])
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    top.append(&timer_badge);
     top.append(&eq);
 
     let lyric = gtk::Label::builder()
@@ -289,9 +314,16 @@ fn build_ui(app: &gtk::Application) {
     buttons.append(&play);
     buttons.append(&next);
     // Media page: the player, or a short note when nothing is playing.
-    let no_media = gtk::Label::builder().label(tr("Tidak ada media yang diputar", "Nothing playing")).css_classes(["no-media"]).build();
+    let no_media = gtk::Label::builder()
+        .label(tr("Tidak ada media yang diputar", "Nothing playing"))
+        .css_classes(["no-media"])
+        .build();
     // Shown when more than one player is open; cycles which one the notch controls.
-    let player_btn = gtk::Button::builder().css_classes(["player-switch"]).halign(gtk::Align::Center).visible(false).build();
+    let player_btn = gtk::Button::builder()
+        .css_classes(["player-switch"])
+        .halign(gtk::Align::Center)
+        .visible(false)
+        .build();
     let body = gtk::Box::new(gtk::Orientation::Vertical, 10);
     body.append(&player_btn);
     body.append(&head);
@@ -299,20 +331,79 @@ fn build_ui(app: &gtk::Application) {
     body.append(&buttons);
     body.append(&no_media);
 
-    // Home page: big clock, date, system stats, and the clipboard button.
-    let clock = gtk::Label::builder().css_classes(["title", "clock"]).build();
-    let date = gtk::Label::builder().css_classes(["artist"]).build();
-    let stats = gtk::Label::builder().css_classes(["stats"]).build();
-    let clock_box = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    // Home page: editorial asymmetric clock + date on the left, horizontal micro-meters on the right,
+    // and quick timer + clipboard pills below.
+    let clock = gtk::Label::builder().css_classes(["title", "clock"]).xalign(0.0).build();
+    let date = gtk::Label::builder().css_classes(["artist"]).xalign(0.0).build();
+    let clock_box = gtk::Box::new(gtk::Orientation::Vertical, 1);
+    clock_box.set_valign(gtk::Align::Center);
     clock_box.set_hexpand(true);
     clock_box.append(&clock);
     clock_box.append(&date);
-    let home_head = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+
+    let stats_box = gtk::Grid::builder()
+        .row_spacing(5)
+        .column_spacing(8)
+        .valign(gtk::Align::Center)
+        .build();
+    let stat_bars = std::array::from_fn(|_| {
+        gtk::ProgressBar::builder()
+            .css_classes(["stat-bar"])
+            .valign(gtk::Align::Center)
+            .build()
+    });
+    let stat_vals = std::array::from_fn(|_| gtk::Label::builder().css_classes(["stat-val"]).xalign(1.0).width_chars(4).build());
+    for (row, name) in ["CPU", "RAM", "TMP"].into_iter().enumerate() {
+        let lbl = gtk::Label::builder().label(name).css_classes(["stat-lbl"]).xalign(0.0).build();
+        stats_box.attach(&lbl, 0, row as i32, 1, 1);
+        stats_box.attach(&stat_bars[row], 1, row as i32, 1, 1);
+        stats_box.attach(&stat_vals[row], 2, row as i32, 1, 1);
+    }
+
+    let timer_minus = gtk::Button::builder()
+        .label("−")
+        .css_classes(["timer-step"])
+        .tooltip_text(tr("Kurangi 1 menit", "Minus 1 minute"))
+        .build();
+    let timer_entry = gtk::Entry::builder()
+        .text("25m")
+        .width_chars(5)
+        .max_width_chars(6)
+        .xalign(0.5)
+        .css_classes(["timer-input"])
+        .tooltip_text(tr(
+            "Ketik menit (mis. 10 atau 1:30) lalu Enter",
+            "Type minutes (e.g. 10 or 1:30) and press Enter",
+        ))
+        .build();
+    let timer_plus = gtk::Button::builder()
+        .label("+")
+        .css_classes(["timer-step"])
+        .tooltip_text(tr("Tambah 1 menit", "Plus 1 minute"))
+        .build();
+    let timer_btn = gtk::Button::builder()
+        .label("▶")
+        .css_classes(["timer-run"])
+        .tooltip_text(tr("Mulai / hentikan timer", "Start / stop timer"))
+        .build();
+    let timer_box = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    timer_box.add_css_class("timer-group");
+    timer_box.set_valign(gtk::Align::Center);
+    timer_box.append(&timer_minus);
+    timer_box.append(&timer_entry);
+    timer_box.append(&timer_plus);
+    timer_box.append(&timer_btn);
+
+    let home_actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    home_actions.append(&timer_box);
+    home_actions.append(&clip_btn);
+
+    let home_head = gtk::Box::new(gtk::Orientation::Horizontal, 18);
     home_head.append(&clock_box);
-    home_head.append(&clip_btn);
+    home_head.append(&stats_box);
     let home_body = gtk::Box::new(gtk::Orientation::Vertical, 10);
     home_body.append(&home_head);
-    home_body.append(&stats);
+    home_body.append(&home_actions);
     let clips = gtk::Box::new(gtk::Orientation::Vertical, 4);
     clips.set_width_request(260);
     clips.set_valign(gtk::Align::Start);
@@ -332,7 +423,10 @@ fn build_ui(app: &gtk::Application) {
     let section = |text: &str| gtk::Label::builder().label(text).css_classes(["section"]).xalign(0.0).build();
     let dl_active = gtk::Box::new(gtk::Orientation::Vertical, 6);
     let dl_recent = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    let open_folder = gtk::Button::builder().label(tr("📂  Buka folder Download", "📂  Open Downloads folder")).css_classes(["clip"]).build();
+    let open_folder = gtk::Button::builder()
+        .label(tr("📂  Buka folder Download", "📂  Open Downloads folder"))
+        .css_classes(["clip"])
+        .build();
     open_folder.connect_clicked(|_| {
         let _ = gio::AppInfo::launch_default_for_uri(&gio::File::for_path(downloads_dir()).uri(), None::<&gio::AppLaunchContext>);
     });
@@ -352,7 +446,10 @@ fn build_ui(app: &gtk::Application) {
     qr_view.append(&qr_pic);
     qr_view.append(
         &gtk::Label::builder()
-            .label(tr("Pindai dengan HP · klik untuk kembali", "Scan with your phone · click to go back"))
+            .label(tr(
+                "Pindai dengan HP · klik untuk kembali",
+                "Scan with your phone · click to go back",
+            ))
             .css_classes(["time"])
             .build(),
     );
@@ -385,11 +482,20 @@ fn build_ui(app: &gtk::Application) {
     // Screenshots page: thumbnail row, filled by screenshots.rs.
     let shots_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     let shots_page = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    shots_page.append(&gtk::Label::builder().label("Screenshots").css_classes(["section"]).xalign(0.0).build());
+    shots_page.append(
+        &gtk::Label::builder()
+            .label("Screenshots")
+            .css_classes(["section"])
+            .xalign(0.0)
+            .build(),
+    );
     shots_page.append(&shots_row);
     shots_page.append(
         &gtk::Label::builder()
-            .label(tr("Seret ke aplikasi lain · klik untuk membuka", "Drag into another app · click to open"))
+            .label(tr(
+                "Seret ke aplikasi lain · klik untuk membuka",
+                "Drag into another app · click to open",
+            ))
             .css_classes(["time"])
             .xalign(0.0)
             .build(),
@@ -400,15 +506,29 @@ fn build_ui(app: &gtk::Application) {
     if cfg().screenshots {
         pages.add_named(&shots_page, Some("screenshots"));
     }
-    let arrow = |icon: &str| {
-        gtk::Button::builder().icon_name(icon).css_classes(["page-arrow"]).valign(gtk::Align::Center).build()
+    let nav_bar = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    nav_bar.add_css_class("page-nav");
+    nav_bar.set_halign(gtk::Align::Center);
+    let page_label = |id: &str| match id {
+        "home" => tr("Home", "Home"),
+        "media" => tr("Media", "Media"),
+        "mixer" => tr("Mixer", "Mixer"),
+        "downloads" => tr("Unduh", "Downloads"),
+        "screenshots" => tr("Shots", "Shots"),
+        _ => "",
     };
-    let (page_prev, page_next) = (arrow("go-previous-symbolic"), arrow("go-next-symbolic"));
-    let pager = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    pager.set_margin_top(10);
-    pager.append(&page_prev);
+    let page_pills: Vec<(&'static str, gtk::Button)> = page_order()
+        .into_iter()
+        .map(|id| {
+            let b = gtk::Button::builder().label(page_label(id)).css_classes(["page-pill"]).build();
+            nav_bar.append(&b);
+            (id, b)
+        })
+        .collect();
+    let pager = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    pager.set_margin_top(4);
+    pager.append(&nav_bar);
     pager.append(&pages);
-    pager.append(&page_next);
     let expanded = gtk::Revealer::builder()
         .transition_type(gtk::RevealerTransitionType::SlideDown)
         .transition_duration(200)
@@ -428,15 +548,25 @@ fn build_ui(app: &gtk::Application) {
     notch.append(&top_row);
     // Thin download bar under the top row; stays even with music or in minimal mode.
     // The arrow tells it apart from the song, which uses the same accent color.
-    let dl_bar = gtk::ProgressBar::builder().css_classes(["dl"]).hexpand(true).valign(gtk::Align::Center).build();
+    let dl_bar = gtk::ProgressBar::builder()
+        .css_classes(["dl"])
+        .hexpand(true)
+        .valign(gtk::Align::Center)
+        .build();
     let dl_row = gtk::Box::builder().spacing(6).css_classes(["dl-row"]).visible(false).build();
     let dl_icon = first_icon(&["download-symbolic", "folder-download-symbolic"]);
     dl_row.append(&gtk::Image::builder().icon_name(dl_icon).pixel_size(12).build());
     dl_row.append(&dl_bar);
     notch.append(&dl_row);
+    notch.append(&expanded);
     notch.append(&lyric);
     notch.append(&lyric_rom);
-    notch.append(&expanded);
+    let song_bar = gtk::ProgressBar::builder()
+        .css_classes(["song-trace"])
+        .hexpand(true)
+        .visible(false)
+        .build();
+    notch.append(&song_bar);
     window.set_child(Some(&notch));
 
     let ui = Ui {
@@ -461,7 +591,13 @@ fn build_ui(app: &gtk::Application) {
         mic,
         cam,
         share,
-        stats,
+        stats_box,
+        stat_bars,
+        stat_vals,
+        timer_entry,
+        timer_btn,
+        timer_badge,
+        song_bar,
         clips,
         clip_btn,
         accent: gtk::CssProvider::new(),
@@ -469,8 +605,7 @@ fn build_ui(app: &gtk::Application) {
         dl_bar,
         dl_row,
         pages,
-        page_prev,
-        page_next,
+        page_pills,
         clock,
         date,
         no_media,
@@ -520,6 +655,7 @@ fn build_ui(app: &gtk::Application) {
     let state: Shared = Rc::new(RefCell::new(State {
         minimal: cfg().minimal,
         mascot_off: !cfg().mascot,
+        timer_mins: 25,
         ..Default::default()
     }));
 
@@ -627,19 +763,22 @@ fn build_ui(app: &gtk::Application) {
 
     // Read ~/Downloads only when the downloads page comes into view, not on every tick.
     let (u, s) = (ui.clone(), state.clone());
-    ui.pages.connect_visible_child_name_notify(move |p| {
-        match p.visible_child_name().as_deref() {
+    ui.pages
+        .connect_visible_child_name_notify(move |p| match p.visible_child_name().as_deref() {
             Some("downloads") => fill_downloads_page(&u, &s.borrow()),
             Some("mixer") => fill_mixer_page(&u),
             _ => {}
-        }
-    });
+        });
     // Switch to the next open player and keep it until it closes.
     let s = state.clone();
     ui.player_btn.connect_clicked(move |_| {
         let mut st = s.borrow_mut();
         let current = st.player.as_ref().map(|p| p.inner().destination().to_string());
-        let i = st.players.iter().position(|(o, _)| Some(o) == current.as_ref()).map_or(0, |i| i + 1);
+        let i = st
+            .players
+            .iter()
+            .position(|(o, _)| Some(o) == current.as_ref())
+            .map_or(0, |i| i + 1);
         if let Some((owner, _)) = st.players.get(i % st.players.len().max(1)).cloned() {
             st.pinned = Some(owner);
             if let Some(tx) = &st.repick {
@@ -647,18 +786,119 @@ fn build_ui(app: &gtk::Application) {
             }
         }
     });
-    // Arrows step through the pages in order.
-    for (btn, step) in [(&ui.page_prev, -1i32), (&ui.page_next, 1)] {
-        let (u, s) = (ui.clone(), state.clone());
+    // Top-edge page pills switch directly on click, or step through pages on scroll.
+    for (id, btn) in &ui.page_pills {
+        let (u, s, id) = (ui.clone(), state.clone(), *id);
         btn.connect_clicked(move |_| {
-            let order = page_order();
-            let i = order.iter().position(|p| Some(*p) == u.pages.visible_child_name().as_deref()).unwrap_or(0) as i32;
-            if let Some(page) = order.get((i + step).max(0) as usize) {
-                u.pages.set_visible_child_name(page);
-            }
+            u.pages.set_visible_child_name(id);
             refresh_compact(&u, &s.borrow());
         });
     }
+    let nav_scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+    let (u, s) = (ui.clone(), state.clone());
+    nav_scroll.connect_scroll(move |_, dx, dy| {
+        let delta = if dx.abs() > dy.abs() { dx } else { dy };
+        if delta.abs() >= 0.5 {
+            let order = page_order();
+            let i = order
+                .iter()
+                .position(|p| Some(*p) == u.pages.visible_child_name().as_deref())
+                .unwrap_or(0) as i32;
+            let step = if delta > 0.0 { 1 } else { -1 };
+            if let Some(page) = order.get((i + step).clamp(0, order.len() as i32 - 1) as usize) {
+                u.pages.set_visible_child_name(page);
+                refresh_compact(&u, &s.borrow());
+            }
+        }
+        glib::Propagation::Stop
+    });
+    nav_bar.add_controller(nav_scroll);
+
+    // Quick timer: − / + buttons, direct text entry (e.g. "10" or "1:30" + Enter), or smooth scroll.
+    let step_timer = |u: &Ui, s: &Shared, w: &gtk::ApplicationWindow, delta_mins: i32| {
+        let mut st = s.borrow_mut();
+        st.editing_timer = false;
+        w.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::None);
+        if st.timer_rem > 0 {
+            let next = (st.timer_rem as i32 + delta_mins * 60).clamp(10, 180 * 60) as u32;
+            st.timer_rem = next;
+            st.timer_mins = next.div_ceil(60);
+        } else {
+            st.timer_mins = (st.timer_mins as i32 + delta_mins).clamp(1, 180) as u32;
+        }
+        drop(st);
+        refresh_compact(u, &s.borrow());
+    };
+    for (btn, d) in [(&timer_minus, -1), (&timer_plus, 1)] {
+        let (u, s, w) = (ui.clone(), state.clone(), window.clone());
+        btn.connect_clicked(move |_| step_timer(&u, &s, &w, d));
+    }
+    // Clicking the timer entry requests exclusive Wayland keyboard focus so typing works in any compositor,
+    // strips the "m" unit suffix, and selects the digits so the first keystroke replaces them.
+    let entry_click = gtk::GestureClick::new();
+    entry_click.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let (u, s, w) = (ui.clone(), state.clone(), window.clone());
+    entry_click.connect_pressed(move |_, _, _, _| {
+        let already = s.borrow().editing_timer;
+        s.borrow_mut().editing_timer = true;
+        w.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::Exclusive);
+        if !already {
+            let clean = u.timer_entry.text().trim_end_matches('m').to_string();
+            u.timer_entry.set_text(&clean);
+            let e = u.timer_entry.clone();
+            glib::idle_add_local_once(move || {
+                let _ = e.grab_focus();
+                e.select_region(0, -1);
+            });
+        }
+    });
+    ui.timer_entry.add_controller(entry_click);
+    let (u, s, w) = (ui.clone(), state.clone(), window.clone());
+    ui.timer_entry.connect_activate(move |e| {
+        {
+            let mut st = s.borrow_mut();
+            st.editing_timer = false;
+            if let Some(secs) = parse_timer_secs(&e.text()) {
+                st.timer_rem = secs;
+                st.timer_mins = secs.div_ceil(60).max(1);
+            }
+        }
+        w.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::None);
+        let _ = u.timer_btn.grab_focus();
+        refresh_compact(&u, &s.borrow());
+    });
+    let (u, s, w) = (ui.clone(), state.clone(), window.clone());
+    ui.timer_btn.connect_clicked(move |_| {
+        {
+            let mut st = s.borrow_mut();
+            st.editing_timer = false;
+            if st.timer_rem > 0 {
+                st.timer_rem = 0;
+            } else {
+                let secs = parse_timer_secs(&u.timer_entry.text()).unwrap_or(st.timer_mins.max(1) * 60);
+                st.timer_rem = secs;
+                st.timer_mins = secs.div_ceil(60).max(1);
+            }
+        }
+        w.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::None);
+        refresh_compact(&u, &s.borrow());
+    });
+    let timer_scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    timer_scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let timer_acc = Rc::new(std::cell::Cell::new(0.0f64));
+    let (u, s, w, ta) = (ui.clone(), state.clone(), window.clone(), timer_acc.clone());
+    timer_scroll.connect_scroll(move |_, _, dy| {
+        let next = ta.get() + dy;
+        if next.abs() >= 0.8 {
+            ta.set(0.0);
+            step_timer(&u, &s, &w, if next < 0.0 { 1 } else { -1 });
+        } else {
+            ta.set(next);
+        }
+        glib::Propagation::Stop
+    });
+    timer_scroll.connect_scroll_end(move |_| timer_acc.set(0.0));
+    timer_box.add_controller(timer_scroll);
 
     // Hover opens at once; leaving closes only after a short grace period. While the notch
     // grows, the Wayland surface is resized under a still pointer and GTK reports a leave and
@@ -684,13 +924,25 @@ fn build_ui(app: &gtk::Application) {
             set_open(&u1, &s1, true);
         }
     });
-    let (u2, s2) = (ui.clone(), state.clone());
+    let (u2, s2, w2) = (ui.clone(), state.clone(), window.clone());
     hover.connect_leave(move |_| {
         let seq = hover_gen.get() + 1;
         hover_gen.set(seq);
-        let (u, s, g) = (u2.clone(), s2.clone(), hover_gen.clone());
+        let (u, s, w, g) = (u2.clone(), s2.clone(), w2.clone(), hover_gen.clone());
         glib::timeout_add_local_once(Duration::from_millis(250), move || {
             if g.get() == seq {
+                {
+                    let mut st = s.borrow_mut();
+                    if st.editing_timer {
+                        st.editing_timer = false;
+                        if st.timer_rem == 0
+                            && let Some(secs) = parse_timer_secs(&u.timer_entry.text())
+                        {
+                            st.timer_mins = secs.div_ceil(60).max(1);
+                        }
+                    }
+                }
+                w.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::None);
                 set_open(&u, &s, false);
             }
         });
@@ -724,7 +976,8 @@ fn build_ui(app: &gtk::Application) {
     ui.seek.connect_change_value(move |_, _, secs| {
         if pressed.get() {
             s.borrow_mut().seeking = Some(secs);
-            u.time.set_label(&format!("{} / {}", mmss(secs as i64), mmss(u.seek.adjustment().upper() as i64)));
+            u.time
+                .set_label(&format!("{} / {}", mmss(secs as i64), mmss(u.seek.adjustment().upper() as i64)));
         } else {
             seek_to(&s, secs);
         }
@@ -737,7 +990,9 @@ fn build_ui(app: &gtk::Application) {
     for (btn, action) in [(&prev, "prev"), (&ui.play, "play"), (&next, "next")] {
         let state = state.clone();
         btn.connect_clicked(move |_| {
-            let Some(p) = state.borrow().player.clone() else { return };
+            let Some(p) = state.borrow().player.clone() else {
+                return;
+            };
             glib::spawn_future_local(async move {
                 let _ = match action {
                     "prev" => p.previous().await,
@@ -748,25 +1003,38 @@ fn build_ui(app: &gtk::Application) {
         });
     }
 
+    if cfg().stats {
+        update_stats(&ui, &mut state.borrow_mut().cpu_prev);
+    }
     refresh_compact(&ui, &state.borrow());
     let (u, s) = (ui.clone(), state.clone());
     glib::timeout_add_seconds_local(1, move || {
-        refresh_compact(&u, &s.borrow());
-        if u.stats.is_visible() && u.expanded.reveals_child() && u.pages.visible_child_name().as_deref() == Some("home") {
-            let text = read_stats(&mut s.borrow_mut().cpu_prev);
-            u.stats.set_label(&text);
+        let finished = {
+            let mut st = s.borrow_mut();
+            if st.timer_rem > 0 {
+                st.timer_rem -= 1;
+                st.timer_rem == 0
+            } else {
+                false
+            }
+        };
+        if finished {
+            show_alert_for(&u, &s, tr("⏱  Timer selesai!", "⏱  Timer finished!").into(), 5);
+        } else {
+            refresh_compact(&u, &s.borrow());
+        }
+        if u.stats_box.is_visible() && u.expanded.reveals_child() && u.pages.visible_child_name().as_deref() == Some("home") {
+            update_stats(&u, &mut s.borrow_mut().cpu_prev);
         }
         glib::ControlFlow::Continue
     });
 
-    // ponytail: MPRIS never signals Position, so poll it while lyrics or the seek bar are on screen; extrapolate locally if 2 calls/s ever matters.
+    // ponytail: MPRIS never signals Position, so poll it while music plays; extrapolate locally if 2 calls/s ever matters.
     let (u, s) = (ui.clone(), state.clone());
     glib::timeout_add_local(Duration::from_millis(500), move || {
         let st = s.borrow();
-        let visible = !st.lyrics.is_empty() || u.expanded.reveals_child();
-        drop(st);
-        let st = s.borrow();
-        if let (true, true, None, Some(p)) = (st.playing, visible, st.seeking, st.player.clone()) {
+        if let (true, None, Some(p)) = (st.playing, st.seeking, st.player.clone()) {
+            drop(st);
             let (u, s) = (u.clone(), s.clone());
             glib::spawn_future_local(async move {
                 if let Ok(us) = p.position().await {
@@ -776,8 +1044,11 @@ fn build_ui(app: &gtk::Application) {
                     let rom = idx.and_then(|i| s.borrow().lyrics_rom.get(i).cloned().flatten());
                     u.lyric_rom.set_label(rom.as_deref().unwrap_or_default());
                     highlight_lyric(&u, &mut s.borrow_mut(), idx);
-                    u.seek.set_value(us as f64 / 1e6);
-                    u.time.set_label(&format!("{} / {}", mmss(us / 1_000_000), mmss(u.seek.adjustment().upper() as i64)));
+                    let secs = us as f64 / 1e6;
+                    let upper = u.seek.adjustment().upper().max(1.0);
+                    u.seek.set_value(secs);
+                    u.song_bar.set_fraction((secs / upper).clamp(0.0, 1.0));
+                    u.time.set_label(&format!("{} / {}", mmss(us / 1_000_000), mmss(upper as i64)));
                 }
             });
         }
@@ -851,19 +1122,31 @@ fn build_ui(app: &gtk::Application) {
 /// `mic` shows the mic dot, `alert=<text>` shows a popup.
 #[cfg(debug_assertions)]
 fn demo(ui: &Ui, state: &Shared) {
-    let Ok(spec) = std::env::var("NUSA_DEMO") else { return };
+    let Ok(spec) = std::env::var("NUSA_DEMO") else {
+        return;
+    };
     let (ui, state) = (ui.clone(), state.clone());
     glib::timeout_add_seconds_local_once(3, move || {
         let mut st = state.borrow_mut();
-        st.mic_apps = if spec.split(',').any(|o| o == "mic") { vec!["Teams".into()] } else { vec![] };
+        st.mic_apps = if spec.split(',').any(|o| o == "mic") {
+            vec!["Teams".into()]
+        } else {
+            vec![]
+        };
         drop(st);
         for opt in spec.split(',') {
             match opt.split_once('=') {
                 Some(("page", page)) => {
+                    if page == "home" && cfg().stats {
+                        update_stats(&ui, &mut state.borrow_mut().cpu_prev);
+                    }
                     ui.pages.set_visible_child_full(page, gtk::StackTransitionType::None);
                     set_open(&ui, &state, true);
                 }
                 Some(("alert", text)) => show_alert_for(&ui, &state, text.into(), 30),
+                Some(("timer", secs)) => {
+                    state.borrow_mut().timer_rem = secs.parse().unwrap_or(1500);
+                }
                 _ if opt == "mascot" => set_mood(&ui, &state, Mood::Awake),
                 _ => {}
             }
@@ -887,7 +1170,10 @@ fn refresh_compact(ui: &Ui, st: &State) {
     } else if let Some((_, p)) = &st.download {
         format!("⬇  {}%", (p * 100.0).round())
     } else {
-        glib::DateTime::now_local().and_then(|d| d.format("%H:%M")).map(|s| s.to_string()).unwrap_or_default()
+        glib::DateTime::now_local()
+            .and_then(|d| d.format("%H:%M"))
+            .map(|s| s.to_string())
+            .unwrap_or_default()
     };
     // Fade new text in, except the clock ticking over to the next minute.
     let old = ui.compact.label();
@@ -906,18 +1192,42 @@ fn refresh_compact(ui: &Ui, st: &State) {
     let full_lyrics = open && on_media && has_lyrics && ui.lyrics_btn.is_active();
     ui.lyrics_btn.set_visible(has_lyrics);
     ui.lyrics_scroll.set_visible(full_lyrics);
-    ui.lyric.set_visible(st.playing && !st.lyrics.is_empty() && st.alert.is_none() && !full_lyrics);
-    ui.lyric_rom.set_visible(ui.lyric.is_visible() && st.lyrics_rom.iter().any(Option::is_some));
-    ui.stats.set_visible(cfg().stats);
+    ui.lyric
+        .set_visible(st.playing && !st.lyrics.is_empty() && st.alert.is_none() && !full_lyrics);
+    ui.lyric_rom
+        .set_visible(ui.lyric.is_visible() && st.lyrics_rom.iter().any(Option::is_some));
+    ui.stats_box.set_visible(cfg().stats);
     let has_clips = ui.clips.first_child().is_some();
     ui.clip_btn.set_visible(has_clips);
-    ui.clips.set_visible(open && !on_media && has_clips && ui.clip_btn.is_active() && !ui.qr_view.is_visible());
+    ui.clips
+        .set_visible(open && !on_media && has_clips && ui.clip_btn.is_active() && !ui.qr_view.is_visible());
     ui.shot_thumb.set_paintable(st.alert_thumb.as_ref());
     ui.shot_thumb.set_visible(st.alert.is_some() && st.alert_thumb.is_some());
-    let order = page_order();
-    let i = order.iter().position(|p| Some(*p) == page.as_deref()).unwrap_or(0);
-    ui.page_prev.set_sensitive(i > 0);
-    ui.page_next.set_sensitive(i + 1 < order.len());
+    for (id, btn) in &ui.page_pills {
+        if page.as_deref() == Some(*id) {
+            btn.add_css_class("active");
+        } else {
+            btn.remove_css_class("active");
+        }
+    }
+    if st.timer_rem > 0 {
+        let t = mmss(st.timer_rem as i64);
+        if !st.editing_timer && ui.timer_entry.text() != t {
+            ui.timer_entry.set_text(&t);
+        }
+        ui.timer_btn.set_label("■");
+        ui.timer_btn.add_css_class("running");
+        ui.timer_badge.set_label(&format!("⏱ {t}"));
+        ui.timer_badge.set_visible(true);
+    } else {
+        let want = format!("{}m", st.timer_mins.max(1));
+        if !st.editing_timer && ui.timer_entry.text() != want {
+            ui.timer_entry.set_text(&want);
+        }
+        ui.timer_btn.set_label("▶");
+        ui.timer_btn.remove_css_class("running");
+        ui.timer_badge.set_visible(false);
+    }
     // Gradient source: album cover while a track is on, wallpaper when idle, else the config colors.
     let tinted = has_track && cfg().follow_cover && ui.art.paintable().is_some();
     let wall = !has_track && cfg().follow_wallpaper;
@@ -953,6 +1263,8 @@ fn refresh_compact(ui: &Ui, st: &State) {
         ui.notch.remove_css_class("open");
     }
     let thin = !open && !show_compact && !ui.lyric.is_visible();
+    ui.song_bar
+        .set_visible(!open && media && !thin && ui.seek.adjustment().upper() > 1.0);
     // While music plays the closed notch keeps one width, so long titles and each new lyric
     // line don't make it grow and shrink. The labels then ellipsize to that width.
     let fixed = media && !thin && !ui.want_open.get();
@@ -968,7 +1280,12 @@ fn refresh_compact(ui: &Ui, st: &State) {
     }
     // Player switch: name of the one in control, only when there is a choice.
     let current = st.player.as_ref().map(|p| p.inner().destination().to_string());
-    let name = st.players.iter().find(|(o, _)| Some(o) == current.as_ref()).map(|(_, n)| n.as_str()).unwrap_or("");
+    let name = st
+        .players
+        .iter()
+        .find(|(o, _)| Some(o) == current.as_ref())
+        .map(|(_, n)| n.as_str())
+        .unwrap_or("");
     ui.player_btn.set_visible(st.players.len() > 1);
     ui.player_btn.set_label(&format!("{name}  ⇄"));
     // Media page: the player, or the "nothing playing" note.
@@ -980,7 +1297,8 @@ fn refresh_compact(ui: &Ui, st: &State) {
     }
     // Home page clock.
     let now = glib::DateTime::now_local().ok();
-    ui.clock.set_label(&now.as_ref().and_then(|d| d.format("%H:%M").ok()).unwrap_or_default());
+    ui.clock
+        .set_label(&now.as_ref().and_then(|d| d.format("%H:%M").ok()).unwrap_or_default());
     ui.date.set_label(&now.as_ref().map(tanggal).unwrap_or_default());
 }
 
@@ -1078,11 +1396,35 @@ fn show_alert_for(ui: &Ui, state: &Shared, text: String, secs: u32) {
 }
 
 const HARI: [&str; 7] = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"];
-const BULAN: [&str; 12] =
-    ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+const BULAN: [&str; 12] = [
+    "Januari",
+    "Februari",
+    "Maret",
+    "April",
+    "Mei",
+    "Juni",
+    "Juli",
+    "Agustus",
+    "September",
+    "Oktober",
+    "November",
+    "Desember",
+];
 const DAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const MONTHS: [&str; 12] =
-    ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
 
 /// "Senin, 26 Oktober 2026" or "Monday, 26 October 2026", independent of the system locale.
 fn tanggal(d: &glib::DateTime) -> String {
@@ -1106,6 +1448,28 @@ fn seek_to(state: &Shared, secs: f64) {
 
 fn mmss(secs: i64) -> String {
     format!("{}:{:02}", secs / 60, secs % 60)
+}
+
+/// Parse a timer input like "10", "10m", "90s", or "1:30" into seconds (clamped 5s..=3h).
+fn parse_timer_secs(raw: &str) -> Option<u32> {
+    let s = raw.trim().to_ascii_lowercase();
+    let secs = if let Some((m, sec)) = s.split_once(':') {
+        m.trim().parse::<u32>().ok()? * 60 + sec.trim().parse::<u32>().ok()?
+    } else if let Some(sec) = s.strip_suffix('s') {
+        sec.trim().parse::<u32>().ok()?
+    } else {
+        s.trim_end_matches('m').trim().parse::<u32>().ok()? * 60
+    };
+    (secs > 0).then(|| secs.clamp(5, 180 * 60))
+}
+
+#[test]
+fn timer_input_parsing() {
+    assert_eq!(parse_timer_secs("25"), Some(1500));
+    assert_eq!(parse_timer_secs("10m"), Some(600));
+    assert_eq!(parse_timer_secs("45s"), Some(45));
+    assert_eq!(parse_timer_secs("1:30"), Some(90));
+    assert_eq!(parse_timer_secs("0"), None);
 }
 
 #[test]

@@ -60,16 +60,24 @@ pub(crate) async fn pick_player(
 ) -> (Option<PlayerProxy<'static>>, Vec<(String, String)>) {
     let mut alive = vec![];
     for name in dbus.list_names().await.unwrap_or_default() {
-        let Some(suffix) = name.strip_prefix("org.mpris.MediaPlayer2.") else { continue };
+        let Some(suffix) = name.strip_prefix("org.mpris.MediaPlayer2.") else {
+            continue;
+        };
         // Debug builds: NUSA_ONLY_PLAYER=<text> ignores players whose bus name lacks it, so
         // tools/ can test with a fake player while the user's real one keeps playing.
         #[cfg(debug_assertions)]
         if std::env::var("NUSA_ONLY_PLAYER").is_ok_and(|o| !name.contains(&o)) {
             continue;
         }
-        let Ok(owner) = dbus.get_name_owner(name.as_ref()).await else { continue };
-        let Ok(p) = player(conn, owner.to_string()).await else { continue };
-        let Ok(status) = p.playback_status().await else { continue };
+        let Ok(owner) = dbus.get_name_owner(name.as_ref()).await else {
+            continue;
+        };
+        let Ok(p) = player(conn, owner.to_string()).await else {
+            continue;
+        };
+        let Ok(status) = p.playback_status().await else {
+            continue;
+        };
         let identity = match MediaPlayerProxy::builder(conn).destination(owner.to_string()).build().await {
             Ok(mp) => mp.identity().await.ok(),
             Err(_) => None,
@@ -117,13 +125,19 @@ pub(crate) async fn player(conn: &Connection, dest: String) -> zbus::Result<Play
 }
 
 pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
-    let Some(p) = state.borrow().player.clone() else { return };
+    let Some(p) = state.borrow().player.clone() else {
+        return;
+    };
     let (Ok(meta), Ok(status)) = (p.metadata().await, p.playback_status().await) else {
         // Player went away.
         clear_player(ui, state);
         return;
     };
-    let str_of = |k: &str| meta.get(k).and_then(|v| String::try_from(v.try_clone().ok()?).ok()).unwrap_or_default();
+    let str_of = |k: &str| {
+        meta.get(k)
+            .and_then(|v| String::try_from(v.try_clone().ok()?).ok())
+            .unwrap_or_default()
+    };
     let title = str_of("xesam:title");
     let artist = meta
         .get("xesam:artist")
@@ -132,7 +146,11 @@ pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
         .unwrap_or_default();
     let length_s = meta
         .get("mpris:length")
-        .and_then(|v| i64::try_from(v.try_clone().ok()?).ok().or_else(|| u64::try_from(v.try_clone().ok()?).ok().map(|n| n as i64)))
+        .and_then(|v| {
+            i64::try_from(v.try_clone().ok()?)
+                .ok()
+                .or_else(|| u64::try_from(v.try_clone().ok()?).ok().map(|n| n as i64))
+        })
         .unwrap_or(0)
         / 1_000_000;
 
@@ -144,20 +162,18 @@ pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
         glib::spawn_future_local(async move {
             let url = art_url.clone();
             let cover = gio::spawn_blocking(move || square_cover(&load_art(&url)?)).await.ok().flatten();
-            if let Some((_, _, _, (r, g, b))) = &cover {
-                ui.accent.load_from_string(&format!(
-                    ".notch.tinted {{ background: linear-gradient(160deg, {} 0%, rgb({},{},{}) 65%, rgb({r},{g},{b}) 100%); }}",
-                    cfg().gradient[0],
-                    r / 3,
-                    g / 3,
-                    b / 3
-                ));
+            if let Some((_, _, _, rgb)) = &cover {
+                ui.accent.load_from_string(&ambient_css("tinted", *rgb));
             }
             if state.borrow().art_url != art_url {
                 return; // track changed while loading
             }
             let tex = cover.map(|(pixels, alpha, stride, _)| {
-                let format = if alpha { gtk::gdk::MemoryFormat::R8g8b8a8 } else { gtk::gdk::MemoryFormat::R8g8b8 };
+                let format = if alpha {
+                    gtk::gdk::MemoryFormat::R8g8b8a8
+                } else {
+                    gtk::gdk::MemoryFormat::R8g8b8
+                };
                 gtk::gdk::MemoryTexture::new(112, 112, format, &pixels, stride).upcast::<gtk::gdk::Texture>()
             });
             ui.art.set_paintable(tex.as_ref());
@@ -166,12 +182,26 @@ pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
             refresh_compact(&ui, &state.borrow());
         });
     }
-    state.borrow_mut().track_id = meta.get("mpris:trackid").and_then(|v| OwnedObjectPath::try_from(v.try_clone().ok()?).ok());
-    ui.seek.set_range(0.0, length_s.max(1) as f64);
+    state.borrow_mut().track_id = meta
+        .get("mpris:trackid")
+        .and_then(|v| OwnedObjectPath::try_from(v.try_clone().ok()?).ok());
+    let len = length_s.max(1) as f64;
+    let pos_us = p.position().await.unwrap_or(0).max(0);
+    let pos_s = (pos_us as f64 / 1e6).clamp(0.0, len);
+    ui.seek.set_range(0.0, len);
+    if state.borrow().seeking.is_none() {
+        ui.seek.set_value(pos_s);
+        ui.time.set_label(&format!("{} / {}", mmss(pos_s as i64), mmss(length_s.max(1))));
+    }
+    ui.song_bar.set_fraction((pos_s / len).clamp(0.0, 1.0));
     ui.seek.parent().unwrap().set_visible(length_s > 0);
     ui.title.set_label(&title);
     ui.artist.set_label(&artist);
-    ui.play.set_icon_name(if playing { "media-playback-pause-symbolic" } else { "media-playback-start-symbolic" });
+    ui.play.set_icon_name(if playing {
+        "media-playback-pause-symbolic"
+    } else {
+        "media-playback-start-symbolic"
+    });
 
     let changed = {
         let mut st = state.borrow_mut();
@@ -196,54 +226,109 @@ pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
             // Fetch and romanize off the main thread: lrclib can take seconds, and kakasi
             // loads its dictionary on first use.
             let (lyrics, rom) = gio::spawn_blocking(move || {
-                let lyrics = if cfg().lyrics { fetch_lyrics(&t, &artist, length_s) } else { vec![] };
-                let rom = if cfg().romanize { romanize_song(&lyrics) } else { vec![None; lyrics.len()] };
+                let lyrics = if cfg().lyrics {
+                    fetch_lyrics(&t, &artist, length_s)
+                } else {
+                    vec![]
+                };
+                let rom = if cfg().romanize {
+                    romanize_song(&lyrics)
+                } else {
+                    vec![None; lyrics.len()]
+                };
                 (lyrics, rom)
             })
             .await
             .unwrap_or_default();
             if state.borrow().track == title {
                 for ((_, line), r) in lyrics.iter().zip(&rom) {
-                    let text = if line.is_empty() { "♪".to_string() } else { glib::markup_escape_text(line).to_string() };
-                    let markup = match r {
-                        Some(r) => format!("{text}\n<span size='small' alpha='60%'>{}</span>", glib::markup_escape_text(r)),
-                        None => text,
-                    };
-                    let label = gtk::Label::builder()
-                        .label(markup)
-                        .use_markup(true)
-                        .css_classes(["lrc"])
+                    let item = gtk::Box::new(gtk::Orientation::Vertical, 1);
+                    item.add_css_class("lrc");
+                    let text = if line.is_empty() { "♪" } else { line.as_str() };
+                    let main = gtk::Label::builder()
+                        .label(text)
+                        .css_classes(["lrc-main"])
                         .xalign(0.0)
                         .wrap(true)
-                        .max_width_chars(30)
+                        .max_width_chars(28)
                         .build();
-                    ui.lyrics_list.append(&label);
+                    item.append(&main);
+                    if let Some(r) = r {
+                        let sub = gtk::Label::builder()
+                            .label(r.as_str())
+                            .css_classes(["lrc-rom"])
+                            .xalign(0.0)
+                            .wrap(true)
+                            .max_width_chars(32)
+                            .build();
+                        item.append(&sub);
+                    }
+                    ui.lyrics_list.append(&item);
                 }
                 state.borrow_mut().lyrics = lyrics;
                 state.borrow_mut().lyrics_rom = rom;
+                let idx = current_index(&state.borrow().lyrics, pos_us / 1000);
+                let line = current_line(&state.borrow().lyrics, pos_us / 1000).unwrap_or_default();
+                let r = idx.and_then(|i| state.borrow().lyrics_rom.get(i).cloned().flatten());
+                ui.lyric.set_label(&line);
+                ui.lyric_rom.set_label(r.as_deref().unwrap_or_default());
+                highlight_lyric(&ui, &mut state.borrow_mut(), idx);
                 refresh_compact(&ui, &state.borrow());
             }
         });
     }
 }
 
-/// Light up line `idx` in the full lyrics list and scroll it to the middle.
+/// Stage-style lyrics focus: active line `.now` in full size, ±1 lines `.near`, ±2 lines `.mid`.
 pub(crate) fn highlight_lyric(ui: &Ui, st: &mut State, idx: Option<usize>) {
     if st.lyric_idx == idx {
         return;
     }
-    let row = |i: Option<usize>| i.and_then(|i| ui.lyrics_list.row_at_index(i as i32)).and_then(|r| r.child());
-    if let Some(old) = row(st.lyric_idx) {
-        old.remove_css_class("now");
-    }
-    if let Some(new) = row(idx) {
-        new.add_css_class("now");
-        if let Some(b) = new.compute_bounds(&ui.lyrics_list) {
-            let adj = ui.lyrics_scroll.vadjustment();
-            adj.set_value((b.y() as f64 + b.height() as f64 / 2.0 - adj.page_size() / 2.0).max(0.0));
+    let len = st.lyrics.len();
+    for i in 0..len {
+        let Some(child) = ui.lyrics_list.row_at_index(i as i32).and_then(|r| r.child()) else {
+            continue;
+        };
+        for c in ["now", "near", "mid"] {
+            child.remove_css_class(c);
+        }
+        if let Some(active) = idx {
+            match i.abs_diff(active) {
+                0 => child.add_css_class("now"),
+                1 => child.add_css_class("near"),
+                2 => child.add_css_class("mid"),
+                _ => {}
+            }
         }
     }
+    if let Some(new) = idx.and_then(|i| ui.lyrics_list.row_at_index(i as i32)).and_then(|r| r.child())
+        && let Some(b) = new.compute_bounds(&ui.lyrics_list)
+    {
+        let adj = ui.lyrics_scroll.vadjustment();
+        adj.set_value((b.y() as f64 + b.height() as f64 / 2.0 - adj.page_size() / 2.0).max(0.0));
+    }
     st.lyric_idx = idx;
+}
+
+/// Layered radial glow from the top-left cover position over a dark directional gradient,
+/// plus a bright tint for the equalizer, song progress trace and active romanized lyric.
+pub(crate) fn ambient_css(class: &str, (r, g, b): (u8, u8, u8)) -> String {
+    let lift = |c: u8, num: u16, floor: u16| ((c as u16 * num / 110 + floor).min(255)) as u8;
+    let scale = |c: u8, num: u16, den: u16| (c as u16 * num / den) as u8;
+    let (gr, gg, gb) = (lift(r, 155, 18), lift(g, 155, 18), lift(b, 155, 18));
+    let (hr, hg, hb) = (lift(r, 190, 65), lift(g, 190, 65), lift(b, 190, 65));
+    format!(
+        ".notch.{class} {{ background: radial-gradient(circle at 44px 48px, rgba({gr},{gg},{gb},0.62) 0%, rgba({r},{g},{b},0.28) 46%, transparent 78%), linear-gradient(160deg, {} 0%, rgb({},{},{}) 58%, rgb({},{},{}) 100%); }} \
+         .notch.{class} .eq > box, .notch.{class} progressbar.song-trace progress {{ background: rgb({hr},{hg},{hb}); }} \
+         .notch.{class} .lrc.now .lrc-rom {{ color: rgb({hr},{hg},{hb}); }}",
+        cfg().gradient[0],
+        r / 4,
+        g / 4,
+        b / 4,
+        scale(r, 3, 4),
+        scale(g, 3, 4),
+        scale(b, 3, 4),
+    )
 }
 
 /// Center-crop a cover to a square and shrink it to 112px, 2x the largest size we draw.
@@ -298,4 +383,6 @@ pub(crate) fn accent_is_dark_and_keeps_hue() {
     let red = [200u8, 20, 20].repeat(4);
     let (r, g, b) = accent_color(&red, 3, 6, 2);
     assert!(r == 110 && g < 20 && b < 20, "{r} {g} {b}");
+    let css = ambient_css("tinted", (r, g, b));
+    assert!(css.contains("radial-gradient") && css.contains("song-trace"));
 }
