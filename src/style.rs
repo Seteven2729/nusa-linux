@@ -28,10 +28,10 @@ window { background: transparent; }
 .dl-row { margin-top: 3px; }
 .dl-row image { opacity: 0.7; }
 progressbar.dl trough { min-height: 3px; min-width: 0; border-radius: 2px; background: rgba(255,255,255,0.22); border: none; }
-progressbar.dl progress { min-height: 3px; border-radius: 2px; background: {ACCENT}; border: none; }
+progressbar.dl progress { min-height: 3px; min-width: 0; border-radius: 2px; background: {ACCENT}; border: none; }
 progressbar.song-trace { margin-top: 3px; }
 progressbar.song-trace trough { min-height: 2px; min-width: 0; border-radius: 99px; background: rgba(255,255,255,0.14); border: none; }
-progressbar.song-trace progress { min-height: 2px; border-radius: 99px; background: {HIGHLIGHT}; border: none; }
+progressbar.song-trace progress { min-height: 2px; min-width: 0; border-radius: 99px; background: {HIGHLIGHT}; border: none; }
 
 .notch scale { padding: 0; min-width: 210px; }
 .notch scale trough { min-height: 4px; border-radius: 2px; background: rgba(255,255,255,0.22); border: none; }
@@ -83,7 +83,7 @@ progressbar.song-trace progress { min-height: 2px; border-radius: 99px; backgrou
 .stat-val { font-size: 11px; font-weight: 600; color: {MUTED}; font-feature-settings: 'tnum'; }
 .stat-val.hot { color: #ff9f0a; font-weight: 700; }
 progressbar.stat-bar trough { min-height: 4px; min-width: 68px; border-radius: 99px; background: rgba(255,255,255,0.14); border: none; }
-progressbar.stat-bar progress { min-height: 4px; border-radius: 99px; background: {ACCENT}; border: none; }
+progressbar.stat-bar progress { min-height: 4px; min-width: 0; border-radius: 99px; background: {ACCENT}; border: none; }
 progressbar.stat-bar.hot progress { background: #ff9f0a; }
 .timer-badge { font-size: 11px; font-weight: 700; color: {HIGHLIGHT}; background: rgba(255,255,255,0.12); border-radius: 999px; padding: 1px 7px; font-feature-settings: 'tnum'; }
 .timer-group { background: rgba(255,255,255,0.06); border-radius: 999px; padding: 2px 4px; }

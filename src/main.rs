@@ -126,8 +126,8 @@ struct State {
     cam_pw: bool,
     /// The screen is being shared (a non-camera PipeWire video source exists).
     sharing: bool,
-    /// Download being shown: (app name, progress 0..1).
-    download: Option<(String, f64)>,
+    /// Download being shown: (name, status label, progress 0..1).
+    download: Option<(String, String, f64)>,
     /// Every open MPRIS player as (bus owner, display name).
     players: Vec<(String, String)>,
     /// Player chosen with the switch button; kept until it closes.
@@ -138,8 +138,8 @@ struct State {
     alert_thumb: Option<gtk::gdk::Texture>,
     /// Asks the MPRIS loop to pick again (after the switch button changes `pinned`).
     repick: Option<async_channel::Sender<()>>,
-    /// Every download in progress, by app, for the downloads page.
-    downloads: Vec<(String, f64)>,
+    /// Every download in progress as (name, status label, progress 0..1), for the downloads page.
+    downloads: Vec<(String, String, f64)>,
     /// Remaining countdown seconds for the quick timer (0 when stopped).
     timer_rem: u32,
     /// Preset minutes for the quick timer (1..=180).
@@ -1102,6 +1102,7 @@ fn build_ui(app: &gtk::Application) {
         });
     }
     if cfg().downloads {
+        spawn_download_watch(&ui, &state);
         let (u, s) = (ui.clone(), state.clone());
         glib::spawn_future_local(async move {
             if let Err(e) = download_loop(u, s).await {
@@ -1167,18 +1168,19 @@ fn refresh_compact(ui: &Ui, st: &State) {
         a.clone()
     } else if st.playing {
         format!("♪  {}", st.track)
-    } else if let Some((_, p)) = &st.download {
-        format!("⬇  {}%", (p * 100.0).round())
+    } else if let Some((_, label, _)) = &st.download {
+        format!("⬇  {label}")
     } else {
         glib::DateTime::now_local()
             .and_then(|d| d.format("%H:%M"))
             .map(|s| s.to_string())
             .unwrap_or_default()
     };
-    // Fade new text in, except the clock ticking over to the next minute.
+    // Fade new text in, except the clock ticking over or download progress ticking up.
     let old = ui.compact.label();
     let is_clock = |t: &str| t.len() == 5 && t.as_bytes()[2] == b':';
-    if old != text && !(is_clock(&old) && is_clock(&text)) {
+    let is_dl = |t: &str| t.starts_with("⬇  ") && st.alert.is_none();
+    if old != text && !(is_clock(&old) && is_clock(&text)) && !(is_dl(&old) && is_dl(&text)) {
         retrigger(&ui.compact, "fade", 250);
     }
     ui.compact.set_label(&text);
@@ -1239,7 +1241,7 @@ fn refresh_compact(ui: &Ui, st: &State) {
         }
     }
     // When open, the expanded view shows either the track or a big clock, so the top row would only repeat it.
-    let show_compact = st.alert.is_some() || (!open && !st.minimal);
+    let show_compact = st.alert.is_some() || (!open && (!st.minimal || st.download.is_some()));
     ui.top_row.set_reveal_child(show_compact);
     // Items inside the row keep their visibility while it slides away, so the slide has
     // something to animate; the row's revealer alone decides whether it shows.
@@ -1249,7 +1251,7 @@ fn refresh_compact(ui: &Ui, st: &State) {
     // The mascot stands in for the clock (or the song title) once you have been away a while.
     let mascot = st.mood != Mood::None && st.alert.is_none() && st.download.is_none();
     ui.dl_row.set_visible(!open && st.download.is_some());
-    if let Some((_, p)) = &st.download {
+    if let Some((_, _, p)) = &st.download {
         ui.dl_bar.set_fraction(*p);
     }
     ui.mascot.set_visible(mascot);
