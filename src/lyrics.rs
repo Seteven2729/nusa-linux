@@ -133,39 +133,62 @@ pub(crate) fn romanize_cyrillic(s: &str) -> String {
         .collect()
 }
 
-/// Synced lyrics for a track: disk cache first, then lrclib's exact match, then its search
-/// (which catches titles like "LOSER - KR Ver." that don't match exactly).
+/// Synced lyrics for a track: disk cache first, then lrclib's search and exact match,
+/// preferring native script (Hangul/kana/Han/Cyrillic) over pre-romanized uploads.
 pub(crate) fn fetch_lyrics(title: &str, artist: &str, duration_s: i64) -> Vec<(i64, String)> {
     let key: String = format!("{artist} - {title}").chars().map(|c| if c == '/' { '_' } else { c }).collect();
     let cache = glib::user_cache_dir().join("nusa/lyrics").join(format!("{key}.lrc"));
     if let Ok(lrc) = std::fs::read_to_string(&cache) {
         return parse_lrc(&lrc);
     }
-    let call = |path: &str, with_duration: bool| -> Option<serde_json::Value> {
-        let mut req = ureq::get(format!("https://lrclib.net/api/{path}"))
-            .header("User-Agent", "nusa-linux (personal use)")
+    let get_json = |req: ureq::RequestBuilder<ureq::typestate::WithoutBody>| -> Option<serde_json::Value> {
+        serde_json::from_str(&req.header("User-Agent", "nusa-linux (personal use)").call().ok()?.body_mut().read_to_string().ok()?).ok()
+    };
+    let exact = || {
+        let mut req = ureq::get("https://lrclib.net/api/get")
             .query("track_name", title)
             .query("artist_name", artist);
-        if with_duration && duration_s > 0 {
+        if duration_s > 0 {
             req = req.query("duration", duration_s.to_string());
         }
-        serde_json::from_str(&req.call().ok()?.body_mut().read_to_string().ok()?).ok()
+        get_json(req)?["syncedLyrics"].as_str().map(str::to_owned)
     };
-    let exact = call("get", true).and_then(|j| j["syncedLyrics"].as_str().map(str::to_owned));
-    let lrc = exact.or_else(|| {
-        // Closest duration among synced search results.
-        let results = call("search", false)?;
-        results
-            .as_array()?
-            .iter()
-            .filter(|r| r["syncedLyrics"].is_string())
-            .min_by_key(|r| (r["duration"].as_f64().unwrap_or(0.0) as i64 - duration_s).abs())
-            .and_then(|r| r["syncedLyrics"].as_str().map(str::to_owned))
-    });
+    let searched = get_json(ureq::get("https://lrclib.net/api/search").query("q", format!("{artist} {title}")))
+        .or_else(|| {
+            get_json(
+                ureq::get("https://lrclib.net/api/search")
+                    .query("track_name", title)
+                    .query("artist_name", artist),
+            )
+        })
+        .and_then(|v| pick_best_lrc(&v, duration_s));
+    let lrc = match (exact(), searched) {
+        (Some(e), Some(s)) if !has_native_script(&e) && has_native_script(&s) => Some(s),
+        (Some(e), _) => Some(e),
+        (None, s) => s,
+    };
     let Some(lrc) = lrc else { return vec![] };
     // Only successes are cached, so a song lrclib doesn't know yet is retried next time.
     let _ = std::fs::create_dir_all(cache.parent().unwrap()).and_then(|_| std::fs::write(&cache, &lrc));
     parse_lrc(&lrc)
+}
+
+fn has_native_script(s: &str) -> bool {
+    s.chars()
+        .any(|c| is_hangul(c) || is_han(c) || ('\u{3040}'..='\u{30ff}').contains(&c) || ('\u{0400}'..='\u{04ff}').contains(&c))
+}
+
+fn pick_best_lrc(results: &serde_json::Value, duration_s: i64) -> Option<String> {
+    results
+        .as_array()?
+        .iter()
+        .filter_map(|r| Some((r["syncedLyrics"].as_str()?, r["duration"].as_f64().unwrap_or(0.0) as i64)))
+        .min_by_key(|(lrc, dur)| {
+            let diff = if duration_s > 0 { (dur - duration_s).abs() } else { 0 };
+            // Among tracks within 3 s of the target duration, prefer native script over romanized Latin.
+            (diff > 3, !has_native_script(lrc), diff)
+        })
+        .map(|(lrc, _)| lrc.to_owned())
 }
 
 /// "[mm:ss.xx] text" lines into (ms, text), sorted.
@@ -199,6 +222,11 @@ pub(crate) fn lrc() {
     assert_eq!(current_line(&l, 12500).as_deref(), Some("second"));
     assert_eq!(current_line(&l, 30000).as_deref(), Some("second"));
     assert_eq!(current_index(&l, 60000), Some(2));
+    let candidates = serde_json::json!([
+        {"duration": 225.0, "syncedLyrics": "[00:13.98]yeongwonhan geon jeoldae eopseo"},
+        {"duration": 225.5, "syncedLyrics": "[00:13.98] 영원한 건 절대 없어"}
+    ]);
+    assert_eq!(pick_best_lrc(&candidates, 225).as_deref(), Some("[00:13.98] 영원한 건 절대 없어"));
 }
 
 #[test]

@@ -4,7 +4,7 @@
 
 Notch kecil di tengah atas layar untuk desktop Linux berbasis Wayland. Terinspirasi dari [Nusa for Windows](https://rama2555.github.io/nusa/), ditulis ulang dari nol dengan Rust dan GTK4. Untuk pemakaian pribadi.
 
-Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya. Notch yang terbuka punya lima halaman, pindah dengan panah ‹ ›: Home (jam, tanggal, statistik, clipboard), Media (player), Mixer (volume per aplikasi), Download, dan Screenshots. Saat dibuka, notch langsung ke Media kalau ada lagu, ke Download kalau ada yang sedang diunduh, dan ke Home kalau tidak keduanya.
+Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya. Notch yang terbuka punya lima halaman dengan tab di tepi atas (klik atau scroll untuk pindah): Home (jam, tanggal, bar CPU/RAM/suhu, timer cepat, clipboard), Media (player), Mixer (volume per aplikasi), Unduh (Download), dan Shots (Screenshots). Saat dibuka, notch langsung ke Media kalau ada lagu, ke Unduh kalau ada yang sedang diunduh, dan ke Home kalau tidak keduanya.
 
 <p align="center">
   <img src="docs/screenshots/open-music.png" width="391" alt="Notch terbuka saat musik diputar: cover, judul, seek bar, tombol kontrol, dan baris lirik">
@@ -14,14 +14,14 @@ Hover notch untuk membukanya, geser kursor menjauh untuk menutupnya. Notch yang 
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/closed-music.png" width="297" alt="Notch tertutup saat musik diputar"><br>Tertutup saat musik diputar: lirik dan romanisasinya</td>
-    <td align="center"><img src="docs/screenshots/idle.png" width="260" alt="Tampilan idle dengan jam, tanggal, dan statistik"><br>Idle: jam, tanggal, CPU/RAM/suhu</td>
+    <td align="center"><img src="docs/screenshots/closed-music.png" width="297" alt="Notch tertutup saat musik diputar"><br>Tertutup saat musik diputar: lirik, romanisasi, dan garis progres lagu</td>
+    <td align="center"><img src="docs/screenshots/idle.png" width="260" alt="Halaman Home dengan jam, tanggal, statistik, dan timer"><br>Home: jam, tanggal, bar CPU/RAM/suhu, dan timer cepat</td>
   </tr>
   <tr>
-    <td align="center" colspan="2"><img src="docs/screenshots/lyrics.png" width="600" alt="Panel lirik penuh dengan romanisasi"><br>Panel lirik penuh. Baris yang sedang dinyanyikan menyala, klik baris lain untuk lompat.</td>
+    <td align="center" colspan="2"><img src="docs/screenshots/lyrics.png" width="600" alt="Panel lirik penuh dengan romanisasi"><br>Panel lirik penuh. Baris yang sedang dinyanyikan disorot lebih besar, klik baris lain untuk lompat.</td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/clipboard.png" width="420" alt="Panel clipboard"><br>Clipboard, terbuka hanya setelah tombolnya diklik</td>
+    <td align="center"><img src="docs/screenshots/clipboard.png" width="420" alt="Panel clipboard"><br>Clipboard dengan tombol kode QR, terbuka setelah tombolnya diklik</td>
     <td align="center"><img src="docs/screenshots/mascot.png" width="240" alt="Maskot mata"><br>Maskot muncul saat kamu idle</td>
   </tr>
   <tr>
@@ -44,17 +44,17 @@ Warna notch ikut cover lagu saat musik diputar, dan ikut wallpaper saat idle. Se
 
 ## Fitur
 
-- Lagu yang sedang diputar dari player MPRIS mana pun (Spotify, Strawberry, browser, mpv): cover, judul, artis, prev/play/next, seek bar
-- Warna gradien notch mengikuti warna cover lagu, dan saat idle mengikuti warna wallpaper Plasma
-- Lirik tersinkron dari [lrclib.net](https://lrclib.net), satu baris di bawah judul, atau panel lirik penuh (klik baris untuk lompat)
+- Lagu yang sedang diputar dari player MPRIS mana pun (Spotify, Strawberry, browser, mpv): cover, judul, artis, prev/play/next, seek bar, dan garis tipis progres lagu saat notch tertutup
+- Warna gradien dan pendaran radial mengikuti warna cover lagu, dan saat idle mengikuti warna wallpaper Plasma
+- Lirik tersinkron dari [lrclib.net](https://lrclib.net), satu baris di bawah player (atau di bawah judul saat notch tertutup), atau panel lirik penuh dengan sorotan bertingkat (klik baris untuk lompat)
 - Romanisasi lirik untuk Korea, Jepang (termasuk kanji), Mandarin (pinyin), dan Cyrillic
 - Popup charger dicolok/dicabut, Wi-Fi tersambung/putus, headphone Bluetooth tersambung beserta baterainya
 - Titik oranye saat mikrofon dipakai, hijau saat kamera menyala, merah saat layar sedang di-share
 - Progres download (browser dan aplikasi lain yang memakai Unity LauncherEntry): bar tipis di notch, lalu popup saat selesai. Halaman Download menampilkan semua download yang berjalan dan 4 file terbaru di folder Download (klik untuk membuka).
 - Notifikasi HP lewat KDE Connect, termasuk telepon masuk
 - Maskot mata saat idle: muncul setelah 30 detik, tertidur setelah 3 menit, tersenyum saat kamu kembali. Kalau musik sedang jalan, maskot tersenyum dan mengangguk-angguk. Kalau di-pause, matanya mengantuk.
-- Saat tidak ada lagu: jam besar, tanggal (bahasa Indonesia), dan CPU/RAM/suhu
-- Tombol clipboard di tampilan idle: membuka 3 isi clipboard terakhir (klik untuk copy ulang). Panel tertutup lagi setiap notch ditutup. Tombol QR di tiap item menampilkan isinya sebagai kode QR untuk dipindai HP (maksimal 500 karakter).
+- Halaman Home: jam besar, tanggal (bahasa Indonesia atau Inggris), bar CPU/RAM/suhu (berubah oranye saat beban atau suhu tinggi), dan timer hitung mundur cepat (tombol `−`/`+`, scroll, atau ketik durasi seperti `10`, `45s`, `1:30` lalu Enter; tampil di notch tertutup saat berjalan dan memunculkan popup saat selesai)
+- Tombol clipboard di halaman Home: membuka 3 isi clipboard terakhir (klik untuk copy ulang). Panel tertutup lagi setiap notch ditutup. Tombol QR di tiap item menampilkan isinya sebagai kode QR untuk dipindai HP (maksimal 500 karakter).
 - Halaman Screenshots: 5 screenshot terbaru dari `~/Pictures/Screenshots`. Seret thumbnail ke aplikasi lain, klik untuk membuka, × untuk menyembunyikan dari daftar (file tidak dihapus). Setiap screenshot baru memunculkan thumbnail sebentar di notch.
 - Halaman Mixer: volume output dan slider plus tombol bisu untuk setiap aplikasi yang sedang memutar suara
 - Kalau ada lebih dari satu player (misalnya Strawberry dan browser), tombol `⇄` di halaman Media memilih player yang dikontrol. Pilihan itu bertahan sampai player-nya ditutup.
