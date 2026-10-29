@@ -2,7 +2,7 @@
 # Installs the prebuilt binary from the GitHub release. After a new release:
 # bump pkgver, run `updpkgsums`, then `makepkg --printsrcinfo > .SRCINFO`.
 pkgname=nusa-linux-bin
-pkgver=0.5.4
+pkgver=0.5.5
 pkgrel=1
 pkgdesc="A notch at the top of the screen for Wayland desktops: music, lyrics, alerts"
 arch=('x86_64')
@@ -23,7 +23,7 @@ conflicts=('nusa-linux')
 # Prebuilt binary: no debug symbols to split out.
 options=('!debug')
 source=("$url/releases/download/v$pkgver/nusa-linux-v$pkgver-x86_64-linux.tar.gz")
-sha256sums=('d42406b4c6d0e6b4e3077eb2a885184532b5228b213bec0a8a2023cd76474a0d')
+sha256sums=('9b635c53ea9dacb00bb833129cb583ad32bc7a791081b04e6348c217a6b50bd0')
 
 package() {
   cd "nusa-linux-v$pkgver-x86_64-linux"
