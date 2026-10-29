@@ -17,7 +17,7 @@ The user runs Nusa all day as the systemd user service `nusa-linux.service` and 
 - Commits use the repo's configured noreply email and end with the message body, with no attribution trailer.
 - Never add a `Co-Authored-By` line to commits, and never push a commit that has one.
 - Push to the `repo` remote.
-- Release steps: README, section "Rilis versi baru". CI commits the PKGBUILD bump after each release, so `git pull` before the next commit.
+- When asked to commit and push, always cut a release: if visuals or features changed, update `README.md` and retake any changed `docs/screenshots/*.png` via `tools/shot.sh` first; then bump `version` in `Cargo.toml`, commit, create tag `v<version>`, and push both `master` and the tag to `repo` (README, section "Rilis versi baru"). CI commits the PKGBUILD bump after each release, so `git pull` before the next commit.
 
 ## Agent skills
 
