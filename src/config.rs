@@ -91,7 +91,8 @@ pub(crate) fn config_path() -> PathBuf {
 fn load_config() -> Config {
     let path = config_path();
     if !path.exists() {
-        let _ = std::fs::create_dir_all(path.parent().unwrap()).and_then(|_| std::fs::write(&path, TEMPLATE));
+        let _ = std::fs::create_dir_all(path.parent().unwrap())
+            .and_then(|_| std::fs::write(&path, TEMPLATE));
         migrate_flag_files();
     }
     parse_config(&std::fs::read_to_string(&path).unwrap_or_default())
@@ -114,27 +115,50 @@ fn parse_config(text: &str) -> Config {
     let def: toml_edit::DocumentMut = TEMPLATE.parse().unwrap();
     let item = |table: &str, key: &str| -> Option<toml_edit::Item> {
         let pick = |d: &toml_edit::DocumentMut| {
-            if table.is_empty() { d.get(key).cloned() } else { d.get(table)?.get(key).cloned() }
+            if table.is_empty() {
+                d.get(key).cloned()
+            } else {
+                d.get(table)?.get(key).cloned()
+            }
         };
         pick(&doc).or_else(|| pick(&def))
     };
     // Every feature flag defaults to on; a value of the wrong type counts as unset.
     let flag = |table: &str, key: &str| item(table, key).and_then(|i| i.as_bool()).unwrap_or(true);
     let secs = |key: &str, default: u32| {
-        item("timing", key).and_then(|i| i.as_integer()).map(|n| n.clamp(5, 3600) as u32).unwrap_or(default)
+        item("timing", key)
+            .and_then(|i| i.as_integer())
+            .map(|n| n.clamp(5, 3600) as u32)
+            .unwrap_or(default)
     };
-    let theme_name = doc.get("colors").and_then(|c| c.get("theme")?.as_str()).unwrap_or("nusa");
-    let theme = THEMES.iter().find(|t| t.0 == theme_name).unwrap_or(&THEMES[0]);
+    let theme_name = doc
+        .get("colors")
+        .and_then(|c| c.get("theme")?.as_str())
+        .unwrap_or("nusa");
+    let theme = THEMES
+        .iter()
+        .find(|t| t.0 == theme_name)
+        .unwrap_or(&THEMES[0]);
     let gradient = std::array::from_fn(|i| {
-        let custom = doc.get("colors").and_then(|c| c.get("gradient")?.as_array()?.get(i)?.as_str().map(str::to_owned));
+        let custom = doc.get("colors").and_then(|c| {
+            c.get("gradient")?
+                .as_array()?
+                .get(i)?
+                .as_str()
+                .map(str::to_owned)
+        });
         match custom.filter(|c| theme_name == "custom" && is_hex_color(c)) {
             Some(c) => c,
             None => theme.1[i].to_owned(),
         }
     });
     Config {
-        english: item("", "language").and_then(|i| i.as_str().map(|l| l == "en")).unwrap_or(false),
-        minimal: item("", "minimal").and_then(|i| i.as_bool()).unwrap_or(false),
+        english: item("", "language")
+            .and_then(|i| i.as_str().map(|l| l == "en"))
+            .unwrap_or(false),
+        minimal: item("", "minimal")
+            .and_then(|i| i.as_bool())
+            .unwrap_or(false),
         mascot: flag("", "mascot"),
         lyrics: flag("features", "lyrics"),
         romanize: flag("features", "romanize"),
@@ -163,11 +187,41 @@ fn parse_config(text: &str) -> Config {
 
 /// (name, gradient, muted text, accent, highlight). "custom" keeps the nusa text and control colors.
 const THEMES: [(&str, [&str; 3], &str, &str, &str); 5] = [
-    ("nusa", ["#020510", "#061338", "#0c225c"], "#b9cdf5", "#8fd8ff", "#ffffff"),
-    ("midnight", ["#000000", "#0b0b0d", "#1c1c1f"], "#a1a1aa", "#e5e5ea", "#ffffff"),
-    ("rose", ["#12030a", "#3a0b24", "#6b1740"], "#f5b9d3", "#ff8fc4", "#ffa3d1"),
-    ("forest", ["#020a05", "#0b2a17", "#155e34"], "#b9f5cf", "#8fffb8", "#a3ffc4"),
-    ("custom", ["#020510", "#061338", "#0c225c"], "#b9cdf5", "#8fd8ff", "#ffffff"),
+    (
+        "nusa",
+        ["#020510", "#061338", "#0c225c"],
+        "#b9cdf5",
+        "#8fd8ff",
+        "#ffffff",
+    ),
+    (
+        "midnight",
+        ["#000000", "#0b0b0d", "#1c1c1f"],
+        "#a1a1aa",
+        "#e5e5ea",
+        "#ffffff",
+    ),
+    (
+        "rose",
+        ["#12030a", "#3a0b24", "#6b1740"],
+        "#f5b9d3",
+        "#ff8fc4",
+        "#ffa3d1",
+    ),
+    (
+        "forest",
+        ["#020a05", "#0b2a17", "#155e34"],
+        "#b9f5cf",
+        "#8fffb8",
+        "#a3ffc4",
+    ),
+    (
+        "custom",
+        ["#020510", "#061338", "#0c225c"],
+        "#b9cdf5",
+        "#8fd8ff",
+        "#ffffff",
+    ),
 ];
 
 /// Indonesian or English text, per `language` in config.toml.
@@ -189,7 +243,10 @@ pub(crate) fn theme_names() -> Vec<&'static str> {
 pub(crate) fn current_theme_name() -> &'static str {
     let text = std::fs::read_to_string(config_path()).unwrap_or_default();
     let doc: toml_edit::DocumentMut = text.parse().unwrap_or_default();
-    let name = doc.get("colors").and_then(|c| c.get("theme")?.as_str().map(str::to_owned)).unwrap_or_default();
+    let name = doc
+        .get("colors")
+        .and_then(|c| c.get("theme")?.as_str().map(str::to_owned))
+        .unwrap_or_default();
     THEMES.iter().find(|t| t.0 == name).map_or("nusa", |t| t.0)
 }
 
@@ -202,21 +259,27 @@ pub(crate) fn read_config() -> Config {
 pub(crate) fn save_theme(name: &str) {
     let path = config_path();
     let text = std::fs::read_to_string(&path).unwrap_or_else(|_| TEMPLATE.to_owned());
-    let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else { return };
+    let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else {
+        return;
+    };
     if !doc.contains_table("colors") {
         doc["colors"] = toml_edit::table();
     }
     doc["colors"]["theme"] = toml_edit::value(name);
-    let _ = std::fs::create_dir_all(path.parent().unwrap()).and_then(|_| std::fs::write(&path, doc.to_string()));
+    let _ = std::fs::create_dir_all(path.parent().unwrap())
+        .and_then(|_| std::fs::write(&path, doc.to_string()));
 }
 
 /// Store a top-level toggle from the tray, keeping the file's comments and layout.
 pub(crate) fn save_setting(key: &str, on: bool) {
     let path = config_path();
     let text = std::fs::read_to_string(&path).unwrap_or_else(|_| TEMPLATE.to_owned());
-    let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else { return };
+    let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else {
+        return;
+    };
     doc[key] = toml_edit::value(on);
-    let _ = std::fs::create_dir_all(path.parent().unwrap()).and_then(|_| std::fs::write(&path, doc.to_string()));
+    let _ = std::fs::create_dir_all(path.parent().unwrap())
+        .and_then(|_| std::fs::write(&path, doc.to_string()));
 }
 
 #[test]
@@ -227,23 +290,47 @@ fn config_parsing() {
     assert_eq!(c.gradient[0], "#020510");
     assert!(!c.english && c.mixer);
 
-    let c = parse_config("minimal = true\nlanguage = \"en\"\n[features]\nclipboard = false\n[timing]\nmascot_awake = 1\n[colors]\ntheme = \"custom\"\ngradient = [\"#ff0000\", \"red; }\", \"#00ff00\"]\n");
+    let c = parse_config(
+        "minimal = true\nlanguage = \"en\"\n[features]\nclipboard = false\n[timing]\nmascot_awake = 1\n[colors]\ntheme = \"custom\"\ngradient = [\"#ff0000\", \"red; }\", \"#00ff00\"]\n",
+    );
     assert!(c.english);
-    assert!(c.minimal && !c.clipboard && c.lyrics, "unset keys keep their defaults");
+    assert!(
+        c.minimal && !c.clipboard && c.lyrics,
+        "unset keys keep their defaults"
+    );
     assert_eq!(c.mascot_awake, 5, "timing is clamped");
-    assert_eq!(c.gradient, ["#ff0000", "#061338", "#00ff00"].map(String::from), "bad colors fall back");
+    assert_eq!(
+        c.gradient,
+        ["#ff0000", "#061338", "#00ff00"].map(String::from),
+        "bad colors fall back"
+    );
 
-    assert!(parse_config("this is [ not toml").lyrics, "a broken file means defaults");
+    assert!(
+        parse_config("this is [ not toml").lyrics,
+        "a broken file means defaults"
+    );
 
-    let rose = parse_config("[colors]\ntheme = \"rose\"\ngradient = [\"#ff0000\", \"#ff0000\", \"#ff0000\"]\n");
-    assert_eq!((rose.gradient[1].as_str(), rose.accent.as_str()), ("#3a0b24", "#ff8fc4"), "a preset ignores gradient");
+    let rose = parse_config(
+        "[colors]\ntheme = \"rose\"\ngradient = [\"#ff0000\", \"#ff0000\", \"#ff0000\"]\n",
+    );
+    assert_eq!(
+        (rose.gradient[1].as_str(), rose.accent.as_str()),
+        ("#3a0b24", "#ff8fc4"),
+        "a preset ignores gradient"
+    );
     assert_eq!(rose.highlight, "#ffa3d1");
 
     // Every theme fills every color token in the stylesheet.
     for (name, ..) in THEMES {
         let css = themed_css(&parse_config(&format!("[colors]\ntheme = \"{name}\"\n")));
-        let leftover = css.match_indices('{').any(|(i, _)| css[i + 1..].starts_with(|ch: char| ch.is_ascii_uppercase()));
+        let leftover = css
+            .match_indices('{')
+            .any(|(i, _)| css[i + 1..].starts_with(|ch: char| ch.is_ascii_uppercase()));
         assert!(!leftover, "theme {name} left a color token unfilled");
     }
-    assert_eq!(parse_config("[colors]\ntheme = \"neon\"\n").gradient[0], "#020510", "unknown theme falls back to nusa");
+    assert_eq!(
+        parse_config("[colors]\ntheme = \"neon\"\n").gradient[0],
+        "#020510",
+        "unknown theme falls back to nusa"
+    );
 }

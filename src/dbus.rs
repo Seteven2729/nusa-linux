@@ -2,13 +2,19 @@
 
 use crate::*;
 
-#[proxy(interface = "org.mpris.MediaPlayer2", default_path = "/org/mpris/MediaPlayer2")]
+#[proxy(
+    interface = "org.mpris.MediaPlayer2",
+    default_path = "/org/mpris/MediaPlayer2"
+)]
 pub(crate) trait MediaPlayer {
     #[zbus(property)]
     fn identity(&self) -> zbus::Result<String>;
 }
 
-#[proxy(interface = "org.mpris.MediaPlayer2.Player", default_path = "/org/mpris/MediaPlayer2")]
+#[proxy(
+    interface = "org.mpris.MediaPlayer2.Player",
+    default_path = "/org/mpris/MediaPlayer2"
+)]
 pub(crate) trait Player {
     fn play_pause(&self) -> zbus::Result<()>;
     fn next(&self) -> zbus::Result<()>;
@@ -48,7 +54,10 @@ pub(crate) trait Network {
     fn primary_connection(&self) -> zbus::Result<OwnedObjectPath>;
 }
 
-#[proxy(interface = "org.freedesktop.NetworkManager.Connection.Active", default_service = "org.freedesktop.NetworkManager")]
+#[proxy(
+    interface = "org.freedesktop.NetworkManager.Connection.Active",
+    default_service = "org.freedesktop.NetworkManager"
+)]
 pub(crate) trait ActiveConnection {
     #[zbus(property)]
     fn id(&self) -> zbus::Result<String>;
@@ -70,7 +79,11 @@ pub(crate) trait BtBattery {
     fn percentage(&self) -> zbus::Result<u8>;
 }
 
-#[proxy(interface = "org.kde.klipper.klipper", default_service = "org.kde.klipper", default_path = "/klipper")]
+#[proxy(
+    interface = "org.kde.klipper.klipper",
+    default_service = "org.kde.klipper",
+    default_path = "/klipper"
+)]
 // KDE's D-Bus APIs use camelCase names; zbus would default to PascalCase, so name them explicitly.
 pub(crate) trait Klipper {
     #[zbus(name = "getClipboardHistoryMenu")]
@@ -81,7 +94,10 @@ pub(crate) trait Klipper {
     fn clipboard_history_updated(&self) -> zbus::Result<()>;
 }
 
-#[proxy(interface = "org.kde.kdeconnect.device.notifications.notification", default_service = "org.kde.kdeconnect")]
+#[proxy(
+    interface = "org.kde.kdeconnect.device.notifications.notification",
+    default_service = "org.kde.kdeconnect"
+)]
 pub(crate) trait PhoneNotification {
     #[zbus(property, name = "appName")]
     fn app_name(&self) -> zbus::Result<String>;
@@ -93,7 +109,11 @@ pub(crate) trait PhoneNotification {
     fn silent(&self) -> zbus::Result<bool>;
 }
 
-#[proxy(interface = "org.kde.PlasmaShell", default_service = "org.kde.plasmashell", default_path = "/PlasmaShell")]
+#[proxy(
+    interface = "org.kde.PlasmaShell",
+    default_service = "org.kde.plasmashell",
+    default_path = "/PlasmaShell"
+)]
 pub(crate) trait PlasmaShell {
     #[zbus(name = "wallpaper")]
     fn wallpaper(&self, screen: u32) -> zbus::Result<HashMap<String, OwnedVariant>>;

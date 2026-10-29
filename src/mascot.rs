@@ -10,7 +10,14 @@ pub(crate) enum Music {
     Paused,
 }
 
-pub(crate) fn draw_eyes(cr: &gtk::cairo::Context, w: f64, h: f64, mood: Mood, blink: bool, music: Music) {
+pub(crate) fn draw_eyes(
+    cr: &gtk::cairo::Context,
+    w: f64,
+    h: f64,
+    mood: Mood,
+    blink: bool,
+    music: Music,
+) {
     use std::f64::consts::PI;
     let (ew, eh, gap) = (9.0, 13.0, 8.0);
     // Music overrides the idle expression (except the hello wave): happy eyes bobbing to the
@@ -20,7 +27,12 @@ pub(crate) fn draw_eyes(cr: &gtk::cairo::Context, w: f64, h: f64, mood: Mood, bl
         (_, Music::Playing(_)) => Mood::Wave,
         (_, Music::Paused) => Mood::Sleep,
     };
-    let cy = h / 2.0 + if let Music::Playing(up) = music { if up { -2.5 } else { 2.5 } } else { 0.0 };
+    let cy = h / 2.0
+        + if let Music::Playing(up) = music {
+            if up { -2.5 } else { 2.5 }
+        } else {
+            0.0
+        };
     cr.set_source_rgb(1.0, 1.0, 1.0);
     cr.set_line_width(2.0);
     cr.set_line_cap(gtk::cairo::LineCap::Round);
@@ -67,7 +79,12 @@ pub(crate) fn draw_eyes(cr: &gtk::cairo::Context, w: f64, h: f64, mood: Mood, bl
 /// Idle levels from the compositor: 1 = quiet for `timing.mascot_awake`, 2 = for `timing.mascot_sleep`.
 pub(crate) struct IdleWatch(async_channel::Sender<(u8, bool)>);
 
-impl wayland_client::Dispatch<wayland_client::protocol::wl_registry::WlRegistry, wayland_client::globals::GlobalListContents> for IdleWatch {
+impl
+    wayland_client::Dispatch<
+        wayland_client::protocol::wl_registry::WlRegistry,
+        wayland_client::globals::GlobalListContents,
+    > for IdleWatch
+{
     fn event(
         _: &mut Self,
         _: &wayland_client::protocol::wl_registry::WlRegistry,
@@ -105,7 +122,8 @@ pub(crate) fn spawn_idle_watch(ui: &Ui, state: &Shared) {
         let run = || -> Result<(), Box<dyn std::error::Error>> {
             use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
             let conn = wayland_client::Connection::connect_to_env()?;
-            let (globals, mut queue) = wayland_client::globals::registry_queue_init::<IdleWatch>(&conn)?;
+            let (globals, mut queue) =
+                wayland_client::globals::registry_queue_init::<IdleWatch>(&conn)?;
             let qh = queue.handle();
             let seat: wayland_client::protocol::wl_seat::WlSeat = globals.bind(&qh, 1..=1, ())?;
             let notifier: ExtIdleNotifierV1 = globals.bind(&qh, 1..=1, ())?;

@@ -14,14 +14,20 @@ fn old_autostart_file() -> PathBuf {
 }
 
 fn autostart_enabled() -> bool {
-    systemd_dir().join("graphical-session.target.wants").join(SERVICE).exists()
+    systemd_dir()
+        .join("graphical-session.target.wants")
+        .join(SERVICE)
+        .exists()
 }
 
 /// Start with the graphical session, and come back on its own after a crash.
 /// Exit from the tray quits with status 0, which Restart=on-failure leaves alone.
 fn set_autostart(on: bool) {
     let systemctl = |args: &[&str]| {
-        let _ = std::process::Command::new("systemctl").arg("--user").args(args).status();
+        let _ = std::process::Command::new("systemctl")
+            .arg("--user")
+            .args(args)
+            .status();
     };
     if on {
         let exe = std::env::current_exe().unwrap_or_default();
@@ -32,7 +38,10 @@ fn set_autostart(on: bool) {
             exe.display()
         );
         let dir = systemd_dir();
-        if std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(dir.join(SERVICE), unit)).is_ok() {
+        if std::fs::create_dir_all(&dir)
+            .and_then(|_| std::fs::write(dir.join(SERVICE), unit))
+            .is_ok()
+        {
             systemctl(&["daemon-reload"]);
             systemctl(&["enable", SERVICE]);
         }
@@ -74,7 +83,10 @@ impl ksni::Tray for Tray {
         "Nusa".into()
     }
     fn tool_tip(&self) -> ksni::ToolTip {
-        ksni::ToolTip { title: "Nusa".into(), ..Default::default() }
+        ksni::ToolTip {
+            title: "Nusa".into(),
+            ..Default::default()
+        }
     }
     // A white notch-shaped pill, drawn here so the icon doesn't depend on the icon theme.
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
@@ -89,7 +101,11 @@ impl ksni::Tray for Tray {
                 data.extend_from_slice(&[a, 255, 255, 255]); // ARGB
             }
         }
-        vec![ksni::Icon { width: n as i32, height: n as i32, data }]
+        vec![ksni::Icon {
+            width: n as i32,
+            height: n as i32,
+            data,
+        }]
     }
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::{CheckmarkItem, StandardItem};
@@ -147,7 +163,9 @@ impl ksni::Tray for Tray {
             StandardItem {
                 label: tr("Edit setting", "Edit settings").into(),
                 activate: Box::new(|_| {
-                    let _ = std::process::Command::new("xdg-open").arg(config_path()).spawn();
+                    let _ = std::process::Command::new("xdg-open")
+                        .arg(config_path())
+                        .spawn();
                 }),
                 ..Default::default()
             }
@@ -176,8 +194,16 @@ pub(crate) fn spawn_tray(app: &gtk::Application, ui: &Ui, state: &Shared) {
     use ksni::blocking::TrayMethods;
     let (tx, rx) = async_channel::unbounded();
     let handle = match (Tray {
-        theme: theme_names().iter().position(|n| *n == current_theme_name()).unwrap_or(0),
-        minimal: state.borrow().minimal, mascot: !state.borrow().mascot_off, tx }).spawn() {
+        theme: theme_names()
+            .iter()
+            .position(|n| *n == current_theme_name())
+            .unwrap_or(0),
+        minimal: state.borrow().minimal,
+        mascot: !state.borrow().mascot_off,
+        tx,
+    })
+    .spawn()
+    {
         Ok(h) => h,
         Err(e) => return eprintln!("tray: {e}"),
     };
@@ -210,8 +236,14 @@ pub(crate) fn spawn_tray(app: &gtk::Application, ui: &Ui, state: &Shared) {
                 TrayMsg::Reload => {
                     use std::os::unix::process::CommandExt;
                     stop_watchers();
-                    let err = std::process::Command::new(std::env::current_exe().unwrap_or_default()).exec();
-                    show_alert(&ui, &state, format!("{}: {err}", tr("Muat ulang gagal", "Reload failed")));
+                    let err =
+                        std::process::Command::new(std::env::current_exe().unwrap_or_default())
+                            .exec();
+                    show_alert(
+                        &ui,
+                        &state,
+                        format!("{}: {err}", tr("Muat ulang gagal", "Reload failed")),
+                    );
                 }
                 TrayMsg::Quit => app.quit(),
             }

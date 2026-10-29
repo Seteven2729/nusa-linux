@@ -34,13 +34,29 @@ pub(crate) fn spawn_capture_watch(ui: &Ui, state: &Shared) {
             }
             let (cam_now, share_now, apps) = {
                 let st = state.borrow();
-                (!st.cam_apps.is_empty() || st.cam_pw, st.sharing, st.cam_apps.join(", "))
+                (
+                    !st.cam_apps.is_empty() || st.cam_pw,
+                    st.sharing,
+                    st.cam_apps.join(", "),
+                )
             };
             if share_now && !share_before {
-                show_alert(&ui, &state, tr("🖥  Layar sedang di-share", "🖥  Screen is being shared").into());
+                show_alert(
+                    &ui,
+                    &state,
+                    tr("🖥  Layar sedang di-share", "🖥  Screen is being shared").into(),
+                );
             } else if cam_now && !cam_before {
-                let who = if apps.is_empty() { String::new() } else { format!(" · {apps}") };
-                show_alert(&ui, &state, format!("{}{who}", tr("📷  Kamera dipakai", "📷  Camera in use")));
+                let who = if apps.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · {apps}")
+                };
+                show_alert(
+                    &ui,
+                    &state,
+                    format!("{}{who}", tr("📷  Kamera dipakai", "📷  Camera in use")),
+                );
             } else {
                 refresh_compact(&ui, &state.borrow());
             }
@@ -57,7 +73,11 @@ fn watch_video_devices(tx: async_channel::Sender<CaptureMsg>) {
         .flatten()
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("video")))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("video"))
+        })
         .collect();
     if devices.is_empty() {
         return;
@@ -68,7 +88,9 @@ fn watch_video_devices(tx: async_channel::Sender<CaptureMsg>) {
         return;
     }
     for dev in &devices {
-        let Ok(path) = std::ffi::CString::new(dev.as_os_str().as_encoded_bytes()) else { continue };
+        let Ok(path) = std::ffi::CString::new(dev.as_os_str().as_encoded_bytes()) else {
+            continue;
+        };
         unsafe { libc::inotify_add_watch(fd, path.as_ptr(), libc::IN_OPEN | libc::IN_CLOSE) };
     }
     let mut last = camera_holders();
@@ -97,11 +119,20 @@ fn camera_holders() -> Vec<String> {
         .into_iter()
         .flatten()
         .flatten()
-        .filter(|p| p.file_name().to_str().is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit())))
         .filter(|p| {
-            std::fs::read_dir(p.path().join("fd")).into_iter().flatten().flatten().any(|fd| {
-                std::fs::read_link(fd.path()).is_ok_and(|t| t.to_string_lossy().starts_with("/dev/video"))
-            })
+            p.file_name()
+                .to_str()
+                .is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit()))
+        })
+        .filter(|p| {
+            std::fs::read_dir(p.path().join("fd"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .any(|fd| {
+                    std::fs::read_link(fd.path())
+                        .is_ok_and(|t| t.to_string_lossy().starts_with("/dev/video"))
+                })
         })
         .filter_map(|p| std::fs::read_to_string(p.path().join("comm")).ok())
         .map(|c| c.trim().to_owned())
@@ -115,7 +146,8 @@ fn camera_holders() -> Vec<String> {
 /// `pw-dump --monitor` prints the PipeWire graph, then every change, as a stream of JSON arrays.
 fn watch_pipewire(tx: async_channel::Sender<CaptureMsg>) {
     let mut cmd = std::process::Command::new("pw-dump");
-    cmd.args(["--monitor", "--no-colors"]).stdout(std::process::Stdio::piped());
+    cmd.args(["--monitor", "--no-colors"])
+        .stdout(std::process::Stdio::piped());
     // SAFETY: prctl is async-signal-safe, which is all pre_exec requires.
     unsafe {
         std::os::unix::process::CommandExt::pre_exec(&mut cmd, || {
@@ -127,7 +159,9 @@ fn watch_pipewire(tx: async_channel::Sender<CaptureMsg>) {
     register_watcher(child.id() as i32);
     let mut nodes = HashMap::new();
     let mut last = (false, false);
-    for update in serde_json::Deserializer::from_reader(child.stdout.take().unwrap()).into_iter::<serde_json::Value>() {
+    for update in serde_json::Deserializer::from_reader(child.stdout.take().unwrap())
+        .into_iter::<serde_json::Value>()
+    {
         let Ok(update) = update else { return };
         let now = apply_pw_update(&mut nodes, &update);
         if now != last {
@@ -147,7 +181,9 @@ type VideoNodes = HashMap<u64, (bool, String)>;
 /// (KWin's screencast stream, for one) exists only while something is shared.
 fn apply_pw_update(nodes: &mut VideoNodes, update: &serde_json::Value) -> (bool, bool) {
     for obj in update.as_array().into_iter().flatten() {
-        let Some(id) = obj["id"].as_u64() else { continue };
+        let Some(id) = obj["id"].as_u64() else {
+            continue;
+        };
         let info = &obj["info"];
         if info.is_null() {
             nodes.remove(&id);
@@ -156,7 +192,10 @@ fn apply_pw_update(nodes: &mut VideoNodes, update: &serde_json::Value) -> (bool,
         let props = &info["props"];
         if props["media.class"].as_str() == Some("Video/Source") {
             let camera = matches!(props["device.api"].as_str(), Some("v4l2" | "libcamera"));
-            nodes.insert(id, (camera, info["state"].as_str().unwrap_or("").to_owned()));
+            nodes.insert(
+                id,
+                (camera, info["state"].as_str().unwrap_or("").to_owned()),
+            );
         } else if let Some((_, state)) = nodes.get_mut(&id) {
             // Later updates may carry only the changed state.
             if let Some(s) = info["state"].as_str() {
@@ -164,7 +203,9 @@ fn apply_pw_update(nodes: &mut VideoNodes, update: &serde_json::Value) -> (bool,
             }
         }
     }
-    let camera = nodes.values().any(|(cam, state)| *cam && state == "running");
+    let camera = nodes
+        .values()
+        .any(|(cam, state)| *cam && state == "running");
     let sharing = nodes.values().any(|(cam, _)| !cam);
     (camera, sharing)
 }
@@ -172,15 +213,34 @@ fn apply_pw_update(nodes: &mut VideoNodes, update: &serde_json::Value) -> (bool,
 #[test]
 fn pipewire_capture_state() {
     let mut nodes = VideoNodes::new();
-    let cam = |state: &str| {
-        serde_json::json!([{ "id": 84, "info": { "state": state, "props": { "media.class": "Video/Source", "device.api": "v4l2" } } }])
-    };
-    assert_eq!(apply_pw_update(&mut nodes, &cam("suspended")), (false, false), "idle camera");
-    assert_eq!(apply_pw_update(&mut nodes, &cam("running")), (true, false), "camera in use");
+    let cam = |state: &str| serde_json::json!([{ "id": 84, "info": { "state": state, "props": { "media.class": "Video/Source", "device.api": "v4l2" } } }]);
+    assert_eq!(
+        apply_pw_update(&mut nodes, &cam("suspended")),
+        (false, false),
+        "idle camera"
+    );
+    assert_eq!(
+        apply_pw_update(&mut nodes, &cam("running")),
+        (true, false),
+        "camera in use"
+    );
     let share = serde_json::json!([{ "id": 200, "info": { "state": "running", "props": { "media.class": "Video/Source", "node.name": "kwin" } } }]);
-    assert_eq!(apply_pw_update(&mut nodes, &share), (true, true), "screen share starts");
+    assert_eq!(
+        apply_pw_update(&mut nodes, &share),
+        (true, true),
+        "screen share starts"
+    );
     let gone = serde_json::json!([{ "id": 200, "info": null }, { "id": 84, "info": { "state": "suspended" } }]);
-    assert_eq!(apply_pw_update(&mut nodes, &gone), (false, false), "share ends, camera stops");
-    let audio = serde_json::json!([{ "id": 5, "info": { "props": { "media.class": "Audio/Source" } } }]);
-    assert_eq!(apply_pw_update(&mut nodes, &audio), (false, false), "non-video ignored");
+    assert_eq!(
+        apply_pw_update(&mut nodes, &gone),
+        (false, false),
+        "share ends, camera stops"
+    );
+    let audio =
+        serde_json::json!([{ "id": 5, "info": { "props": { "media.class": "Audio/Source" } } }]);
+    assert_eq!(
+        apply_pw_update(&mut nodes, &audio),
+        (false, false),
+        "non-video ignored"
+    );
 }
