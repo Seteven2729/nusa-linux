@@ -346,6 +346,7 @@ pub(crate) fn fill_downloads_page(ui: &Ui, st: &State) {
         row.append(
             &gtk::Label::builder()
                 .label(name.as_str())
+                .css_classes(["row-label"])
                 .hexpand(true)
                 .xalign(0.0)
                 .ellipsize(gtk::pango::EllipsizeMode::Middle)

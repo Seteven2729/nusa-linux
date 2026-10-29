@@ -1524,6 +1524,13 @@ fn set_open(ui: &Ui, state: &Shared, open: bool) {
     if open {
         ui.expanded.set_transition_duration(200);
         ui.top_row.set_transition_duration(200);
+        if ui.pager.is_visible() {
+            // Re-opened while still sliding shut: reverse in place without hiding the content.
+            ui.expanded.set_reveal_child(true);
+            ui.width_css.load_from_string("");
+            refresh_compact(ui, &state.borrow());
+            return;
+        }
         refresh_compact(ui, &state.borrow()); // so the measurement sees the right page contents
         // Measure the open content without showing it (visible on and off within this frame).
         ui.pager.set_visible(true);
@@ -1599,15 +1606,18 @@ fn show_alert(ui: &Ui, state: &Shared, text: String) {
 }
 
 fn show_alert_for(ui: &Ui, state: &Shared, text: String, secs: u32) {
-    let seq = {
+    let (seq, fresh) = {
         let mut st = state.borrow_mut();
+        let fresh = st.alert.is_none();
         st.alert = Some(text);
         st.alert_thumb = None;
         st.alert_seq += 1;
-        st.alert_seq
+        (st.alert_seq, fresh)
     };
-    // A small bounce draws the eye to a new alert.
-    retrigger(&ui.notch, "pop", 260);
+    // A small bounce draws the eye to a new alert, without jittering on repeat volume steps.
+    if fresh {
+        retrigger(&ui.notch, "pop", 260);
+    }
     refresh_compact(ui, &state.borrow());
     let (u, s) = (ui.clone(), state.clone());
     glib::timeout_add_seconds_local_once(secs, move || {

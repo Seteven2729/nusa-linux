@@ -127,6 +127,7 @@ pub(crate) fn fill_mixer_page(ui: &Ui) {
             let r = gtk::Box::new(gtk::Orientation::Horizontal, 8);
             let label = gtk::Label::builder()
                 .label(name)
+                .css_classes(["row-label"])
                 .xalign(0.0)
                 .width_request(92)
                 .max_width_chars(12)
