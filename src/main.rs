@@ -89,6 +89,8 @@ struct Ui {
     want_open: Rc<std::cell::Cell<bool>>,
     /// Bumped on every open/close so a stale delayed step can tell it was superseded.
     anim: Rc<std::cell::Cell<u32>>,
+    /// Bumped on every lyric scroll so a newer scroll interrupts an in-flight tick callback.
+    lyric_anim: Rc<std::cell::Cell<u32>>,
 }
 
 /// What the idle mascot is doing; `None` means it is hidden and the clock shows.
@@ -745,6 +747,7 @@ fn build_ui(app: &gtk::Application) {
         width_css: gtk::CssProvider::new(),
         want_open: Default::default(),
         anim: Default::default(),
+        lyric_anim: Default::default(),
     };
     // Cover-tinted gradient lives in its own provider so it can be swapped per track.
     gtk::style_context_add_provider_for_display(
@@ -1191,8 +1194,8 @@ fn build_ui(app: &gtk::Application) {
                     let idx = current_index(&s.borrow().lyrics, us / 1000);
                     let rom = idx.and_then(|i| s.borrow().lyrics_rom.get(i).cloned().flatten());
                     if u.lyric.label() != line && !line.is_empty() {
-                        retrigger(&u.lyric, "fade", 250);
-                        retrigger(&u.lyric_rom, "fade", 250);
+                        retrigger(&u.lyric, "fade", 220);
+                        retrigger(&u.lyric_rom, "fade", 220);
                     }
                     u.lyric.set_label(&line);
                     u.lyric_rom.set_label(rom.as_deref().unwrap_or_default());
@@ -1340,7 +1343,7 @@ fn refresh_compact(ui: &Ui, st: &State) {
     let is_clock = |t: &str| t.len() == 5 && t.as_bytes()[2] == b':';
     let is_dl = |t: &str| t.starts_with("⬇  ") && st.alert.is_none();
     if old != text && !(is_clock(&old) && is_clock(&text)) && !(is_dl(&old) && is_dl(&text)) {
-        retrigger(&ui.compact, "fade", 250);
+        retrigger(&ui.compact, "fade", 220);
     }
     ui.compact.set_label(&text);
     // Minimal mode: closed and quiet, the notch is just a thin black line. Lyrics and alerts still show.
@@ -1353,9 +1356,11 @@ fn refresh_compact(ui: &Ui, st: &State) {
     let full_lyrics = open && on_media && has_lyrics && ui.lyrics_btn.is_active();
     ui.lyrics_btn.set_visible(has_lyrics);
     if full_lyrics {
+        ui.lyrics_rev.set_transition_duration(200);
         ui.lyrics_rev.set_visible(true);
         ui.lyrics_rev.set_reveal_child(true);
     } else {
+        ui.lyrics_rev.set_transition_duration(140);
         ui.lyrics_rev.set_reveal_child(false);
         if !ui.lyrics_rev.is_child_revealed() {
             ui.lyrics_rev.set_visible(false);
@@ -1369,9 +1374,11 @@ fn refresh_compact(ui: &Ui, st: &State) {
     ui.lyric_rom
         .set_visible(st.lyrics_rom.iter().any(Option::is_some));
     if show_lyric {
+        ui.lyric_rev.set_transition_duration(180);
         ui.lyric_rev.set_visible(true);
         ui.lyric_rev.set_reveal_child(true);
     } else {
+        ui.lyric_rev.set_transition_duration(130);
         ui.lyric_rev.set_reveal_child(false);
         if !ui.lyric_rev.is_child_revealed() {
             ui.lyric_rev.set_visible(false);
@@ -1382,9 +1389,11 @@ fn refresh_compact(ui: &Ui, st: &State) {
     ui.clip_btn.set_visible(has_clips);
     let show_clips = open && !on_media && has_clips && ui.clip_btn.is_active();
     if show_clips {
+        ui.clips_rev.set_transition_duration(200);
         ui.clips_rev.set_visible(true);
         ui.clips_rev.set_reveal_child(true);
     } else {
+        ui.clips_rev.set_transition_duration(140);
         ui.clip_stack.set_visible_child_name("list");
         ui.clips_rev.set_reveal_child(false);
         if !ui.clips_rev.is_child_revealed() {
@@ -1513,6 +1522,8 @@ fn set_open(ui: &Ui, state: &Shared, open: bool) {
     let seq = ui.anim.get() + 1;
     ui.anim.set(seq);
     if open {
+        ui.expanded.set_transition_duration(200);
+        ui.top_row.set_transition_duration(200);
         refresh_compact(ui, &state.borrow()); // so the measurement sees the right page contents
         // Measure the open content without showing it (visible on and off within this frame).
         ui.pager.set_visible(true);
@@ -1521,7 +1532,7 @@ fn set_open(ui: &Ui, state: &Shared, open: bool) {
         ui.width_css
             .load_from_string(&format!(".notch {{ min-width: {natural}px; }}"));
         let (u, s) = (ui.clone(), state.clone());
-        glib::timeout_add_local_once(Duration::from_millis(170), move || {
+        glib::timeout_add_local_once(Duration::from_millis(100), move || {
             if u.anim.get() == seq {
                 u.pager.set_visible(true);
                 u.expanded.set_reveal_child(true);
@@ -1530,6 +1541,8 @@ fn set_open(ui: &Ui, state: &Shared, open: bool) {
             }
         });
     } else {
+        ui.expanded.set_transition_duration(140);
+        ui.top_row.set_transition_duration(140);
         if ui.pager.is_visible() {
             let (_, natural, _, _) = ui.pager.measure(gtk::Orientation::Horizontal, -1);
             ui.width_css
@@ -1594,7 +1607,7 @@ fn show_alert_for(ui: &Ui, state: &Shared, text: String, secs: u32) {
         st.alert_seq
     };
     // A small bounce draws the eye to a new alert.
-    retrigger(&ui.notch, "pop", 350);
+    retrigger(&ui.notch, "pop", 260);
     refresh_compact(ui, &state.borrow());
     let (u, s) = (ui.clone(), state.clone());
     glib::timeout_add_seconds_local_once(secs, move || {

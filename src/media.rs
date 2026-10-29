@@ -363,6 +363,8 @@ pub(crate) fn center_lyric(ui: &Ui, idx: Option<usize>, smooth: bool) {
     let Some(b) = new.compute_bounds(&ui.lyrics_list) else {
         return;
     };
+    let seq = ui.lyric_anim.get().wrapping_add(1);
+    ui.lyric_anim.set(seq);
     let adj = ui.lyrics_scroll.vadjustment();
     let target = (b.y() as f64 + b.height() as f64 / 2.0 - adj.page_size() / 2.0).max(0.0);
     if !smooth {
@@ -374,7 +376,11 @@ pub(crate) fn center_lyric(ui: &Ui, idx: Option<usize>, smooth: bool) {
         return;
     }
     let t0 = std::time::Instant::now();
+    let anim = ui.lyric_anim.clone();
     ui.lyrics_scroll.add_tick_callback(move |_, _| {
+        if anim.get() != seq {
+            return glib::ControlFlow::Break;
+        }
         let p = (t0.elapsed().as_secs_f64() / 0.22).min(1.0);
         let ease = 1.0 - (1.0 - p).powi(3);
         adj.set_value(start + (target - start) * ease);
