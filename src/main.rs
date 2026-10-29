@@ -353,6 +353,7 @@ fn build_ui(app: &gtk::Application) {
         .visible(false)
         .build();
     let body = gtk::Box::new(gtk::Orientation::Vertical, 10);
+    body.set_valign(gtk::Align::Center);
     body.append(&player_btn);
     body.append(&head);
     body.append(&seek_row);
@@ -459,7 +460,7 @@ fn build_ui(app: &gtk::Application) {
         .hscrollbar_policy(gtk::PolicyType::Never)
         // min-content-width is ignored without a horizontal scrollbar, so size it directly.
         .width_request(260)
-        .height_request(150)
+        .height_request(138)
         .margin_start(16)
         .build();
     let lyrics_rev = gtk::Revealer::builder()

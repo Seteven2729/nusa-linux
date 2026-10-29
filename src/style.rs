@@ -10,9 +10,9 @@ window { background: transparent; }
   border-radius: 0 0 14px 14px; padding: 5px 14px 7px; min-width: 150px;
   margin: 0 14px 14px; box-shadow: none;
   border: 1px solid rgba(255,255,255,0.07); border-top: none;
-  transition: border-radius 180ms cubic-bezier(0.32, 0.72, 0, 1), padding 180ms cubic-bezier(0.32, 0.72, 0, 1), min-width 180ms cubic-bezier(0.32, 0.72, 0, 1), box-shadow 180ms cubic-bezier(0.32, 0.72, 0, 1);
+  transition: border-radius 180ms cubic-bezier(0.32, 0.72, 0, 1), padding 180ms cubic-bezier(0.32, 0.72, 0, 1), min-width 180ms cubic-bezier(0.32, 0.72, 0, 1);
 }
-.notch.open { border-radius: 0 0 18px 18px; padding: 4px 18px 16px; box-shadow: 0 6px 14px rgba(0,0,0,0.42); }
+.notch.open { border-radius: 0 0 18px 18px; padding: 4px 18px 16px; }
 .notch.thin { padding: 0; min-height: 5px; box-shadow: none; border: none; }
 .notch.music { min-width: 272px; }
 .compact { font-size: 13px; font-weight: 600; letter-spacing: 0px; }
@@ -71,9 +71,9 @@ progressbar.song-trace progress { min-height: 2px; min-width: 0; border-radius: 
 
 .notch scrolledwindow, .notch list, .notch row { background: none; color: #fff; }
 .notch scrollbar { opacity: 0; }
-.notch row { padding: 0; border-radius: 4px; }
+.notch row { padding: 0; border-radius: 0 6px 6px 0; }
 .notch row:hover { background: rgba(255,255,255,0.06); }
-.lrc { padding: 5px 10px; border-radius: 0; border-left: 2px solid transparent; color: #fff; opacity: 0.28; transition: opacity 160ms cubic-bezier(0.23, 1, 0.32, 1), background 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+.lrc { padding: 5px 10px; border-radius: 0 6px 6px 0; border-left: 2px solid transparent; color: #fff; opacity: 0.28; transition: opacity 160ms cubic-bezier(0.23, 1, 0.32, 1), background 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1); }
 .lrc .lrc-main { font-size: 12px; font-weight: 500; color: #fff; }
 .lrc .lrc-rom { font-size: 10px; letter-spacing: 0.2px; color: {MUTED}; opacity: 0.75; }
 .lrc.mid { opacity: 0.45; }
