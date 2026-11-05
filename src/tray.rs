@@ -62,12 +62,15 @@ pub(crate) fn migrate_autostart() {
 pub(crate) enum TrayMsg {
     Minimal(bool),
     Mascot(bool),
+    Layout(usize),
     Theme(usize),
     Reload,
     Quit,
 }
 
 pub(crate) struct Tray {
+    /// Index into layout_names().
+    layout: usize,
     /// Index into theme_names().
     theme: usize,
     minimal: bool,
@@ -138,6 +141,28 @@ impl ksni::Tray for Tray {
             }
             .into(),
             ksni::menu::SubMenu {
+                label: tr("Tampilan", "Layout").into(),
+                submenu: vec![
+                    ksni::menu::RadioGroup {
+                        selected: self.layout,
+                        select: Box::new(|t: &mut Self, i| {
+                            t.layout = i;
+                            let _ = t.tx.send_blocking(TrayMsg::Layout(i));
+                        }),
+                        options: layout_names()
+                            .into_iter()
+                            .map(|n| ksni::menu::RadioItem {
+                                label: n[..1].to_uppercase() + &n[1..],
+                                ..Default::default()
+                            })
+                            .collect(),
+                    }
+                    .into(),
+                ],
+                ..Default::default()
+            }
+            .into(),
+            ksni::menu::SubMenu {
                 label: tr("Tema", "Theme").into(),
                 submenu: vec![
                     ksni::menu::RadioGroup {
@@ -194,6 +219,10 @@ pub(crate) fn spawn_tray(app: &gtk::Application, ui: &Ui, state: &Shared) {
     use ksni::blocking::TrayMethods;
     let (tx, rx) = async_channel::unbounded();
     let handle = match (Tray {
+        layout: layout_names()
+            .iter()
+            .position(|n| *n == current_layout_name())
+            .unwrap_or(0),
         theme: theme_names()
             .iter()
             .position(|n| *n == current_theme_name())
@@ -222,6 +251,13 @@ pub(crate) fn spawn_tray(app: &gtk::Application, ui: &Ui, state: &Shared) {
                     state.borrow_mut().mascot_off = !on;
                     if !on {
                         set_mood(&ui, &state, Mood::None);
+                    }
+                }
+                TrayMsg::Layout(i) => {
+                    if let Some(&name) = layout_names().get(i) {
+                        save_layout(name);
+                        state.borrow_mut().layout = name;
+                        refresh_compact(&ui, &state.borrow());
                     }
                 }
                 // Settings are read once at startup, so reloading means starting over in place.

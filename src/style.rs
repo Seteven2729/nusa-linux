@@ -15,6 +15,20 @@ window { background: transparent; }
 .notch.open { border-radius: 0 0 18px 18px; padding: 4px 18px 16px; }
 .notch.thin { padding: 0; min-height: 5px; box-shadow: none; border: none; }
 .notch.music { min-width: 272px; }
+.notch.layout-island { margin-top: 8px; border-radius: 22px; padding: 6px 14px; border-top: 1px solid rgba(255,255,255,0.12); box-shadow: 0 6px 18px rgba(0,0,0,0.38); }
+.notch.layout-island.open { border-radius: 26px; padding: 6px 18px 16px; }
+.notch.layout-island .mini-art { border-radius: 99px; }
+.notch.layout-island .page-nav { border-radius: 99px; }
+.notch.layout-island button.page-pill { border-radius: 99px; }
+.notch.layout-bar { border-radius: 0 0 6px 6px; padding: 3px 16px 5px; min-width: 200px; }
+.notch.layout-bar.music { min-width: 360px; }
+.notch.layout-bar.open { border-radius: 0 0 10px 10px; padding: 4px 18px 14px; }
+.notch.layout-card { margin-top: 6px; border-radius: 6px; padding: 6px 12px 7px; border: 1px solid alpha({ACCENT}, 0.42); box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
+.notch.layout-card.music { min-width: 300px; }
+.notch.layout-card.open { border-radius: 8px; padding: 6px 18px 16px; }
+.notch.layout-card .mini-art, .notch.layout-card .art, .notch.layout-card .page-nav, .notch.layout-card button.page-pill, .notch.layout-card button.play { border-radius: 3px; }
+.notch button.mini-ctl { min-width: 22px; min-height: 22px; border-radius: 4px; background: rgba(255,255,255,0.08); }
+.notch button.mini-ctl:hover { background: rgba(255,255,255,0.18); }
 .compact { font-size: 13px; font-weight: 600; letter-spacing: 0px; }
 .row-label { font-size: 12px; font-weight: 500; }
 .mini-art { border-radius: 4px; }

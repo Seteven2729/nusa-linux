@@ -39,6 +39,8 @@ struct Ui {
     title: gtk::Label,
     artist: gtk::Label,
     play: gtk::Button,
+    mini_play: gtk::Button,
+    mini_next: gtk::Button,
     buttons: gtk::Box,
     mascot: gtk::DrawingArea,
     lyrics_btn: gtk::ToggleButton,
@@ -113,6 +115,7 @@ struct State {
     /// Bumped per alert so an older alert's timeout doesn't clear a newer one.
     alert_seq: u32,
     track_id: Option<OwnedObjectPath>,
+    layout: &'static str,
     minimal: bool,
     /// Slider target while the mouse is still held on the seek bar.
     seeking: Option<f64>,
@@ -270,6 +273,20 @@ fn build_ui(app: &gtk::Application) {
         .visible(false)
         .build();
     top.append(&timer_badge);
+    let mini_play = gtk::Button::builder()
+        .icon_name("media-playback-start-symbolic")
+        .css_classes(["mini-ctl"])
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    let mini_next = gtk::Button::builder()
+        .icon_name("media-skip-forward-symbolic")
+        .css_classes(["mini-ctl"])
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    top.append(&mini_play);
+    top.append(&mini_next);
     top.append(&eq);
 
     let lyric = gtk::Label::builder()
@@ -704,6 +721,8 @@ fn build_ui(app: &gtk::Application) {
         title,
         artist,
         play,
+        mini_play,
+        mini_next,
         buttons,
         mascot,
         lyrics_btn,
@@ -778,6 +797,7 @@ fn build_ui(app: &gtk::Application) {
         }
     });
     let state: Shared = Rc::new(RefCell::new(State {
+        layout: cfg().layout,
         minimal: cfg().minimal,
         mascot_off: !cfg().mascot,
         timer_mins: 25,
@@ -1132,7 +1152,13 @@ fn build_ui(app: &gtk::Application) {
     spawn_tray(app, &ui, &state);
     migrate_autostart();
 
-    for (btn, action) in [(&prev, "prev"), (&ui.play, "play"), (&next, "next")] {
+    for (btn, action) in [
+        (&prev, "prev"),
+        (&ui.play, "play"),
+        (&next, "next"),
+        (&ui.mini_play, "play"),
+        (&ui.mini_next, "next"),
+    ] {
         let state = state.clone();
         btn.connect_clicked(move |_| {
             let Some(p) = state.borrow().player.clone() else {
@@ -1201,6 +1227,9 @@ fn build_ui(app: &gtk::Application) {
                     u.lyric.set_label(&line);
                     u.lyric_rom.set_label(rom.as_deref().unwrap_or_default());
                     highlight_lyric(&u, &mut s.borrow_mut(), idx);
+                    if s.borrow().layout == "bar" {
+                        refresh_compact(&u, &s.borrow());
+                    }
                     let secs = us as f64 / 1e6;
                     let upper = u.seek.adjustment().upper().max(1.0);
                     u.seek.set_value(secs);
@@ -1280,6 +1309,7 @@ fn build_ui(app: &gtk::Application) {
 /// Debug builds only: NUSA_DEMO puts the notch in a state for tests and screenshots,
 /// 3 s after start (see tools/shot.sh). Comma-separated:
 /// `page=<home|media|mixer|downloads|screenshots>` opens on that page,
+/// `layout=<notch|island|bar|card>` switches layout preset,
 /// `lyrics` / `clips` turn on those panels, `mascot` wakes the mascot,
 /// `mic` shows the mic dot, `alert=<text>` shows a popup.
 #[cfg(debug_assertions)]
@@ -1306,6 +1336,11 @@ fn demo(ui: &Ui, state: &Shared) {
                         .set_visible_child_full(page, gtk::StackTransitionType::None);
                     set_open(&ui, &state, true);
                 }
+                Some(("layout", name)) => {
+                    if let Some(&l) = LAYOUTS.iter().find(|&&l| l == name) {
+                        state.borrow_mut().layout = l;
+                    }
+                }
                 Some(("alert", text)) => show_alert_for(&ui, &state, text.into(), 30),
                 Some(("timer", secs)) => {
                     state.borrow_mut().timer_rem = secs.parse().unwrap_or(1500);
@@ -1327,10 +1362,28 @@ fn demo(ui: &Ui, state: &Shared) {
 }
 
 fn refresh_compact(ui: &Ui, st: &State) {
+    let layout = if st.layout.is_empty() {
+        cfg().layout
+    } else {
+        st.layout
+    };
+    for name in LAYOUTS {
+        let class = format!("layout-{name}");
+        if name == layout {
+            ui.notch.add_css_class(&class);
+        } else {
+            ui.notch.remove_css_class(&class);
+        }
+    }
+    let cur_lyric = ui.lyric.label();
     let text = if let Some(a) = &st.alert {
         a.clone()
     } else if st.playing {
-        format!("♪  {}", st.track)
+        if layout == "bar" && !cur_lyric.is_empty() {
+            format!("♪  {} — {}", st.track, cur_lyric)
+        } else {
+            format!("♪  {}", st.track)
+        }
     } else if let Some((_, label, _)) = &st.download {
         format!("⬇  {label}")
     } else {
@@ -1370,7 +1423,7 @@ fn refresh_compact(ui: &Ui, st: &State) {
     let show_lyric = st.playing
         && !st.lyrics.is_empty()
         && st.alert.is_none()
-        && (!open || (on_media && !full_lyrics));
+        && ((!open && layout != "bar") || (open && on_media && !full_lyrics));
     ui.lyric.set_visible(true);
     ui.lyric_rom
         .set_visible(st.lyrics_rom.iter().any(Option::is_some));
@@ -1457,6 +1510,14 @@ fn refresh_compact(ui: &Ui, st: &State) {
     ui.compact.set_visible(!mascot);
     let media = st.playing && st.alert.is_none();
     ui.eq.set_visible(media);
+    let card_ctl = layout == "card" && has_track && st.alert.is_none() && !mascot;
+    ui.mini_play.set_icon_name(if st.playing {
+        "media-playback-pause-symbolic"
+    } else {
+        "media-playback-start-symbolic"
+    });
+    ui.mini_play.set_visible(card_ctl);
+    ui.mini_next.set_visible(card_ctl);
     ui.mini_art
         .set_visible(media && !mascot && ui.mini_art.paintable().is_some());
     if ui.expanded.reveals_child() {

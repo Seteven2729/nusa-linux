@@ -10,6 +10,8 @@ const TEMPLATE: &str = r##"# Nusa settings. After editing, choose "Reload" in th
 # Language of the notch and tray menu: "id" (Bahasa Indonesia) or "en" (English).
 language = "id"
 
+# Notch appearance preset: "notch", "island", "bar", or "card". Also switched from the tray.
+layout = "notch"
 # Closed notch is a thin line until something happens. Also toggled from the tray.
 minimal = false
 # Eyes that appear when you're idle. Also toggled from the tray.
@@ -48,6 +50,7 @@ follow_wallpaper = true  # tint with the Plasma wallpaper when idle
 
 pub(crate) struct Config {
     pub(crate) english: bool,
+    pub(crate) layout: &'static str,
     pub(crate) minimal: bool,
     pub(crate) mascot: bool,
     pub(crate) lyrics: bool,
@@ -152,10 +155,16 @@ fn parse_config(text: &str) -> Config {
             None => theme.1[i].to_owned(),
         }
     });
+    let layout = doc
+        .get("layout")
+        .and_then(|l| l.as_str())
+        .and_then(|l| LAYOUTS.iter().copied().find(|&k| k == l))
+        .unwrap_or("notch");
     Config {
         english: item("", "language")
             .and_then(|i| i.as_str().map(|l| l == "en"))
             .unwrap_or(false),
+        layout,
         minimal: item("", "minimal")
             .and_then(|i| i.as_bool())
             .unwrap_or(false),
@@ -234,6 +243,37 @@ fn is_hex_color(c: &str) -> bool {
     c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
+pub(crate) const LAYOUTS: [&str; 4] = ["notch", "island", "bar", "card"];
+
+/// Layout preset names in the order the tray lists them.
+pub(crate) fn layout_names() -> Vec<&'static str> {
+    LAYOUTS.to_vec()
+}
+
+/// `layout` as written in the file, "notch" when unset or unknown.
+pub(crate) fn current_layout_name() -> &'static str {
+    let text = std::fs::read_to_string(config_path()).unwrap_or_default();
+    let doc: toml_edit::DocumentMut = text.parse().unwrap_or_default();
+    let name = doc.get("layout").and_then(|l| l.as_str()).unwrap_or("");
+    LAYOUTS
+        .iter()
+        .copied()
+        .find(|&l| l == name)
+        .unwrap_or("notch")
+}
+
+/// Store top-level `layout` from the tray, keeping the file's comments and layout.
+pub(crate) fn save_layout(name: &str) {
+    let path = config_path();
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|_| TEMPLATE.to_owned());
+    let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else {
+        return;
+    };
+    doc["layout"] = toml_edit::value(name);
+    let _ = std::fs::create_dir_all(path.parent().unwrap())
+        .and_then(|_| std::fs::write(&path, doc.to_string()));
+}
+
 /// Theme names in the order the tray lists them.
 pub(crate) fn theme_names() -> Vec<&'static str> {
     THEMES.iter().map(|t| t.0).collect()
@@ -286,6 +326,7 @@ pub(crate) fn save_setting(key: &str, on: bool) {
 fn config_parsing() {
     let c = parse_config(TEMPLATE);
     assert!(!c.minimal && c.mascot && c.lyrics && c.follow_wallpaper);
+    assert_eq!(c.layout, "notch");
     assert_eq!((c.mascot_awake, c.mascot_sleep), (30, 180));
     assert_eq!(c.gradient[0], "#020510");
     assert!(!c.english && c.mixer);
@@ -332,5 +373,11 @@ fn config_parsing() {
         parse_config("[colors]\ntheme = \"neon\"\n").gradient[0],
         "#020510",
         "unknown theme falls back to nusa"
+    );
+    assert_eq!(parse_config("layout = \"island\"\n").layout, "island");
+    assert_eq!(
+        parse_config("layout = \"unknown\"\n").layout,
+        "notch",
+        "unknown layout falls back to notch"
     );
 }
