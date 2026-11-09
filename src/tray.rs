@@ -42,11 +42,11 @@ fn set_autostart(on: bool) {
             .and_then(|_| std::fs::write(dir.join(SERVICE), unit))
             .is_ok()
         {
-            systemctl(&["daemon-reload"]);
-            systemctl(&["enable", SERVICE]);
+            systemctl(["daemon-reload"].as_slice());
+            systemctl(["enable", SERVICE].as_slice());
         }
     } else {
-        systemctl(&["disable", SERVICE]);
+        systemctl(["disable", SERVICE].as_slice());
     }
     // Two autostart mechanisms would race to start Nusa; keep only the service.
     let _ = std::fs::remove_file(old_autostart_file());
@@ -62,12 +62,15 @@ pub(crate) fn migrate_autostart() {
 pub(crate) enum TrayMsg {
     Minimal(bool),
     Mascot(bool),
+    UiStyle(usize),
     Theme(usize),
     Reload,
     Quit,
 }
 
 pub(crate) struct Tray {
+    /// Index into UI_STYLES.
+    ui_style: usize,
     /// Index into theme_names().
     theme: usize,
     minimal: bool,
@@ -138,6 +141,34 @@ impl ksni::Tray for Tray {
             }
             .into(),
             ksni::menu::SubMenu {
+                label: tr("Gaya UI", "UI style").into(),
+                submenu: vec![
+                    ksni::menu::RadioGroup {
+                        selected: self.ui_style,
+                        select: Box::new(|t: &mut Self, i| {
+                            t.ui_style = i;
+                            let _ = t.tx.send_blocking(TrayMsg::UiStyle(i));
+                        }),
+                        options: UI_STYLES
+                            .into_iter()
+                            .map(|n| ksni::menu::RadioItem {
+                                label: match n {
+                                    "island" => tr("Island (Bulat)", "Island (Rounded)"),
+                                    "hud" => tr("HUD (Monospace)", "HUD (Monospace)"),
+                                    "studio" => tr("Studio (Kisi & Dock)", "Studio (Grid & Dock)"),
+                                    _ => tr("Default (Editorial)", "Default (Editorial)"),
+                                }
+                                .into(),
+                                ..Default::default()
+                            })
+                            .collect(),
+                    }
+                    .into(),
+                ],
+                ..Default::default()
+            }
+            .into(),
+            ksni::menu::SubMenu {
                 label: tr("Tema", "Theme").into(),
                 submenu: vec![
                     ksni::menu::RadioGroup {
@@ -194,6 +225,10 @@ pub(crate) fn spawn_tray(app: &gtk::Application, ui: &Ui, state: &Shared) {
     use ksni::blocking::TrayMethods;
     let (tx, rx) = async_channel::unbounded();
     let handle = match (Tray {
+        ui_style: UI_STYLES
+            .iter()
+            .position(|n| *n == current_ui_name())
+            .unwrap_or(0),
         theme: theme_names()
             .iter()
             .position(|n| *n == current_theme_name())
@@ -219,9 +254,16 @@ pub(crate) fn spawn_tray(app: &gtk::Application, ui: &Ui, state: &Shared) {
                 }
                 TrayMsg::Mascot(on) => {
                     save_setting("mascot", on);
-                    state.borrow_mut().mascot_off = !on;
-                    if !on {
+                    let off = matches!(on, false);
+                    state.borrow_mut().mascot_off = off;
+                    if off {
                         set_mood(&ui, &state, Mood::None);
+                    }
+                }
+                TrayMsg::UiStyle(i) => {
+                    if let Some(name) = UI_STYLES.get(i) {
+                        save_ui_style(name);
+                        apply_ui_style(&ui, &state, name);
                     }
                 }
                 // Settings are read once at startup, so reloading means starting over in place.

@@ -58,8 +58,8 @@ Warna notch ikut cover lagu saat musik diputar, dan ikut wallpaper saat idle. Se
 - Halaman Screenshots: 5 screenshot terbaru dari `~/Pictures/Screenshots`. Seret thumbnail ke aplikasi lain, klik untuk membuka, × untuk menyembunyikan dari daftar (file tidak dihapus). Setiap screenshot baru memunculkan thumbnail sebentar di notch.
 - Halaman Mixer: slider volume dan tombol bisu untuk output utama maupun untuk setiap aplikasi yang sedang memutar suara
 - Kalau ada lebih dari satu player (misalnya Strawberry dan browser), tombol `⇄` di halaman Media memilih player yang dikontrol. Pilihan itu bertahan sampai player-nya ditutup.
-- Tema warna (`nusa`, `midnight`, `rose`, `forest`, atau `custom`) dan bahasa tampilan (Indonesia atau Inggris)
-- Menu tray: start with login, minimal notch (garis tipis), maskot, tema, edit settings, reload, exit
+- Tema warna (`nusa`, `midnight`, `rose`, `forest`, atau `custom`), gaya UI di dalam notch (`default`, `island`, `hud`, atau `studio`), dan bahasa tampilan (Indonesia atau Inggris)
+- Menu tray: start with login, minimal notch (garis tipis), maskot, gaya UI, tema, edit settings, reload, exit
 - Hidup lagi sendiri kalau crash (systemd user service)
 
 ## Gesture
@@ -186,6 +186,7 @@ Yang bisa diatur:
 - Bahasa tampilan: `language = "id"` atau `"en"`
 - Fitur mana saja yang aktif: lirik, romanisasi, gesture, statistik, clipboard, mikrofon, kamera dan share layar, mixer, screenshot, notifikasi HP, download, baterai, Wi-Fi, Bluetooth
 - Berapa detik idle sebelum maskot muncul dan tertidur
+- Gaya UI di dalam notch (`ui`): `"default"` (editorial), `"island"` (kapsul bulat terpusat), `"hud"` (monospace sudut tegas), atau `"studio"` (kartu Bento dengan dock navigasi di sisi kiri), yang juga bisa dipilih langsung dari menu tray, Gaya UI, tanpa reload
 - Tema warna (`theme`), yang juga bisa dipilih dari menu tray, Tema, dan langsung berlaku tanpa reload. Atau gradien sendiri dengan `theme = "custom"`, dan apakah warnanya ikut cover lagu atau wallpaper. Selama `follow_cover`/`follow_wallpaper` aktif, warna cover/wallpaper menimpa tema; matikan keduanya untuk melihat warna tema terus.
 
 Nilai yang salah atau hilang memakai default, jadi file yang rusak tidak membuat Nusa gagal jalan.

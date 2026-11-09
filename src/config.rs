@@ -14,6 +14,8 @@ language = "id"
 minimal = false
 # Eyes that appear when you're idle. Also toggled from the tray.
 mascot = true
+# UI style inside the notch: "default", "island", "hud", or "studio". Also picked from the tray.
+ui = "default"
 
 [features]
 lyrics = true       # synced lyrics from lrclib.net
@@ -50,6 +52,7 @@ pub(crate) struct Config {
     pub(crate) english: bool,
     pub(crate) minimal: bool,
     pub(crate) mascot: bool,
+    pub(crate) ui: &'static str,
     pub(crate) lyrics: bool,
     pub(crate) romanize: bool,
     pub(crate) gestures: bool,
@@ -138,7 +141,8 @@ fn parse_config(text: &str) -> Config {
     let theme = THEMES
         .iter()
         .find(|t| t.0 == theme_name)
-        .unwrap_or(&THEMES[0]);
+        .or_else(|| THEMES.first())
+        .unwrap();
     let gradient = std::array::from_fn(|i| {
         let custom = doc.get("colors").and_then(|c| {
             c.get("gradient")?
@@ -147,9 +151,10 @@ fn parse_config(text: &str) -> Config {
                 .as_str()
                 .map(str::to_owned)
         });
-        match custom.filter(|c| theme_name == "custom" && is_hex_color(c)) {
-            Some(c) => c,
-            None => theme.1[i].to_owned(),
+        if let Some(c) = custom.filter(|c| theme_name == "custom" && is_hex_color(c)) {
+            c
+        } else {
+            theme.1.get(i).copied().unwrap_or_default().to_owned()
         }
     });
     Config {
@@ -160,6 +165,12 @@ fn parse_config(text: &str) -> Config {
             .and_then(|i| i.as_bool())
             .unwrap_or(false),
         mascot: flag("", "mascot"),
+        ui: item("", "ui")
+            .and_then(|i| {
+                let s = i.as_str()?;
+                UI_STYLES.iter().copied().find(|u| *u == s)
+            })
+            .unwrap_or("default"),
         lyrics: flag("features", "lyrics"),
         romanize: flag("features", "romanize"),
         gestures: flag("features", "gestures"),
@@ -183,6 +194,33 @@ fn parse_config(text: &str) -> Config {
         follow_cover: flag("colors", "follow_cover"),
         follow_wallpaper: flag("colors", "follow_wallpaper"),
     }
+}
+
+/// Notch UI style presets, in tray menu order.
+pub(crate) const UI_STYLES: [&str; 4] = ["default", "island", "hud", "studio"];
+
+/// `ui` as written in the file, "default" when unset or unknown.
+pub(crate) fn current_ui_name() -> &'static str {
+    let text = std::fs::read_to_string(config_path()).unwrap_or_default();
+    let doc: toml_edit::DocumentMut = text.parse().unwrap_or_default();
+    let name = doc.get("ui").and_then(|u| u.as_str()).unwrap_or_default();
+    UI_STYLES
+        .iter()
+        .copied()
+        .find(|u| *u == name)
+        .unwrap_or("default")
+}
+
+/// Store top-level `ui` from the tray, keeping the file's comments and layout.
+pub(crate) fn save_ui_style(name: &str) {
+    let path = config_path();
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|_| TEMPLATE.to_owned());
+    let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else {
+        return;
+    };
+    doc["ui"] = toml_edit::value(name);
+    let _ = std::fs::create_dir_all(path.parent().unwrap())
+        .and_then(|_| std::fs::write(&path, doc.to_string()));
 }
 
 /// (name, gradient, muted text, accent, highlight). "custom" keeps the nusa text and control colors.
@@ -231,7 +269,9 @@ pub(crate) fn tr(id: &'static str, en: &'static str) -> &'static str {
 
 /// Colors go straight into CSS, so only accept #rrggbb.
 fn is_hex_color(c: &str) -> bool {
-    c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|ch| ch.is_ascii_hexdigit())
+    c.len() == 7
+        && c.strip_prefix('#')
+            .is_some_and(|hex| hex.chars().all(|ch| ch.is_ascii_hexdigit()))
 }
 
 /// Theme names in the order the tray lists them.
@@ -333,4 +373,7 @@ fn config_parsing() {
         "#020510",
         "unknown theme falls back to nusa"
     );
+    assert_eq!(parse_config("ui = \"island\"\n").ui, "island");
+    assert_eq!(parse_config("ui = \"studio\"\n").ui, "studio");
+    assert_eq!(parse_config("ui = \"unknown\"\n").ui, "default");
 }

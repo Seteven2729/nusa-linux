@@ -104,6 +104,84 @@ progressbar.stat-bar.hot progress { background: #ff9f0a; }
 .notch button.timer-run.running { background: {HIGHLIGHT}; color: {GRAD2}; font-weight: 700; }
 .notch button.clip { min-height: 26px; padding: 0 10px; border-radius: 6px; background: rgba(255,255,255,0.06); font-size: 12px; }
 .notch button.clip:hover { background: rgba(255,255,255,0.12); }
+
+/* UI style: island (Dynamic Island / Soft Capsule) */
+.notch.ui-island {
+  border-radius: 0 0 26px 26px; padding: 6px 18px 8px;
+  border: 1px solid rgba(255,255,255,0.14); border-top: none;
+}
+.notch.ui-island.open { border-radius: 0 0 32px 32px; padding: 8px 22px 18px; }
+.notch.ui-island .mini-art { border-radius: 99px; }
+.notch.ui-island .art { border-radius: 16px; border: 1px solid rgba(255,255,255,0.14); }
+.notch.ui-island .eq > box { border-radius: 99px; }
+.notch.ui-island .page-nav { border-radius: 99px; padding: 3px; background: rgba(255,255,255,0.08); }
+.notch.ui-island button.page-pill { border-radius: 99px; padding: 0 12px; }
+.notch.ui-island button { border-radius: 99px; }
+.notch.ui-island button.play { border-radius: 99px; min-width: 42px; min-height: 42px; }
+.notch.ui-island .timer-group { border-radius: 99px; padding: 2px 6px; background: rgba(255,255,255,0.08); }
+.notch.ui-island button.timer-step, .notch.ui-island button.timer-run, .notch.ui-island .timer-badge, .notch.ui-island button.clip, .notch.ui-island button.player-switch { border-radius: 99px; }
+.notch.ui-island .title.clock { font-size: 38px; font-weight: 800; letter-spacing: -1.6px; }
+.notch.ui-island progressbar.stat-bar trough, .notch.ui-island progressbar.stat-bar progress, .notch.ui-island progressbar.dl trough, .notch.ui-island progressbar.dl progress { border-radius: 99px; min-height: 5px; }
+
+/* UI style: hud (Tactical Monospace / Precision Grid) */
+.notch.ui-hud {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  border-radius: 0 0 4px 4px; padding: 5px 14px 7px;
+  border: 1px solid alpha({ACCENT}, 0.35); border-top: none;
+}
+.notch.ui-hud.open { border-radius: 0 0 6px 6px; padding: 6px 16px 14px; }
+.notch.ui-hud .compact { font-size: 12px; letter-spacing: 0.4px; }
+.notch.ui-hud .mini-art, .notch.ui-hud .art, .notch.ui-hud .shot { border-radius: 2px; border: 1px solid rgba(255,255,255,0.2); }
+.notch.ui-hud .title { font-size: 14px; letter-spacing: 0.2px; }
+.notch.ui-hud .title.clock { font-size: 34px; font-weight: 700; letter-spacing: -0.5px; }
+.notch.ui-hud .artist, .notch.ui-hud .time, .notch.ui-hud .stat-lbl { letter-spacing: 0.6px; }
+.notch.ui-hud .page-nav { border-radius: 2px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.14); padding: 2px; }
+.notch.ui-hud button.page-pill { border-radius: 2px; font-size: 10px; letter-spacing: 0.6px; }
+.notch.ui-hud button.page-pill.active { background: alpha({ACCENT}, 0.22); color: {ACCENT}; }
+.notch.ui-hud button { border-radius: 2px; border: 1px solid rgba(255,255,255,0.12); }
+.notch.ui-hud button.play { border-radius: 2px; background: {ACCENT}; color: {GRAD1}; border-color: {ACCENT}; }
+.notch.ui-hud scale trough, .notch.ui-hud scale highlight, .notch.ui-hud scale slider { border-radius: 0; }
+.notch.ui-hud progressbar.stat-bar trough, .notch.ui-hud progressbar.stat-bar progress, .notch.ui-hud progressbar.dl trough, .notch.ui-hud progressbar.dl progress { border-radius: 0; min-height: 5px; }
+.notch.ui-hud .timer-group { border-radius: 2px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.03); }
+.notch.ui-hud button.timer-step, .notch.ui-hud button.timer-run, .notch.ui-hud .timer-badge, .notch.ui-hud button.clip { border-radius: 2px; }
+
+/* UI style: studio (Modular Bento Cards & Side Dock) */
+.notch.ui-studio {
+  border-radius: 0 0 22px 22px; padding: 6px 16px 8px;
+  border: 1px solid rgba(255,255,255,0.16); border-top: none;
+}
+.notch.ui-studio.open { border-radius: 0 0 24px 24px; padding: 12px 16px 14px; }
+.notch.ui-studio .page-nav {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px; padding: 4px; margin-bottom: 0; margin-right: 12px;
+}
+.notch.ui-studio button.page-pill { border-radius: 10px; min-height: 26px; padding: 0 10px; }
+.notch.ui-studio button.page-pill.active { background: {HIGHLIGHT}; color: {GRAD2}; font-weight: 700; }
+.notch.ui-studio .clock-card {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px; padding: 10px 14px;
+}
+.notch.ui-studio .stats-card {
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 14px; padding: 10px 12px;
+}
+.notch.ui-studio .media-card {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px; padding: 10px 12px;
+}
+.notch.ui-studio .art { border-radius: 12px; border: 1px solid rgba(255,255,255,0.16); }
+.notch.ui-studio .buttons-dock {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px; padding: 4px 10px;
+}
+.notch.ui-studio button { border-radius: 10px; }
+.notch.ui-studio button.play { border-radius: 10px; min-width: 44px; min-height: 32px; }
+.notch.ui-studio .timer-group {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px; padding: 3px 6px;
+}
+.notch.ui-studio .title.clock { font-size: 34px; font-weight: 800; letter-spacing: -1.2px; }
+.notch.ui-studio progressbar.stat-bar trough, .notch.ui-studio progressbar.stat-bar progress { min-height: 6px; border-radius: 3px; }
 ";
 
 /// The stylesheet with its {TOKENS} replaced by the theme's colors.

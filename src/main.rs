@@ -69,6 +69,12 @@ struct Ui {
     page_pills: Vec<(&'static str, gtk::Button)>,
     clock: gtk::Label,
     date: gtk::Label,
+    clock_box: gtk::Box,
+    home_head: gtk::Box,
+    home_body: gtk::Box,
+    home_actions: gtk::Box,
+    media_body: gtk::Box,
+    media_text: gtk::Box,
     no_media: gtk::Label,
     head: gtk::Box,
     dl_active: gtk::Box,
@@ -79,6 +85,7 @@ struct Ui {
     /// Screenshot thumbnail shown next to the "saved" alert.
     shot_thumb: gtk::Image,
     qr_pic: gtk::Picture,
+    nav_bar: gtk::Box,
     pager: gtk::Box,
     top_row: gtk::Revealer,
     /// The themed stylesheet; reloaded when a theme is picked from the tray.
@@ -323,6 +330,7 @@ fn build_ui(app: &gtk::Application) {
         .valign(gtk::Align::Center)
         .build();
     let head = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    head.add_css_class("media-card");
     head.append(&art);
     head.append(&text);
     head.append(&lyrics_btn);
@@ -337,6 +345,7 @@ fn build_ui(app: &gtk::Application) {
         .build();
 
     let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 14);
+    buttons.add_css_class("buttons-dock");
     buttons.set_halign(gtk::Align::Center);
     buttons.append(&prev);
     buttons.append(&play);
@@ -371,12 +380,14 @@ fn build_ui(app: &gtk::Application) {
         .xalign(0.0)
         .build();
     let clock_box = gtk::Box::new(gtk::Orientation::Vertical, 1);
+    clock_box.add_css_class("clock-card");
     clock_box.set_valign(gtk::Align::Center);
     clock_box.set_hexpand(true);
     clock_box.append(&clock);
     clock_box.append(&date);
 
     let stats_box = gtk::Grid::builder()
+        .css_classes(["stats-card"])
         .row_spacing(5)
         .column_spacing(8)
         .valign(gtk::Align::Center)
@@ -733,6 +744,12 @@ fn build_ui(app: &gtk::Application) {
         page_pills,
         clock,
         date,
+        clock_box,
+        home_head,
+        home_body,
+        home_actions,
+        media_body: body,
+        media_text: text,
         no_media,
         head,
         dl_active,
@@ -742,6 +759,7 @@ fn build_ui(app: &gtk::Application) {
         shots_row,
         shot_thumb,
         qr_pic,
+        nav_bar: nav_bar.clone(),
         pager,
         top_row,
         css: css.clone(),
@@ -1151,7 +1169,7 @@ fn build_ui(app: &gtk::Application) {
     if cfg().stats {
         update_stats(&ui, &mut state.borrow_mut().cpu_prev);
     }
-    refresh_compact(&ui, &state.borrow());
+    apply_ui_style(&ui, &state, cfg().ui);
     let (u, s) = (ui.clone(), state.clone());
     glib::timeout_add_seconds_local(1, move || {
         let finished = {
@@ -1566,6 +1584,92 @@ fn set_open(ui: &Ui, state: &Shared, open: bool) {
         }
         refresh_compact(ui, &state.borrow());
     }
+}
+
+/// Switch the inner UI style ("default", "island", "hud", "studio") live without restarting.
+pub(crate) fn apply_ui_style(ui: &Ui, state: &Shared, style: &str) {
+    for s in UI_STYLES {
+        ui.notch.remove_css_class(&format!("ui-{s}"));
+    }
+    ui.notch.add_css_class(&format!("ui-{style}"));
+
+    let island = style == "island";
+    let studio = style == "studio";
+
+    // Studio places the page switcher as a vertical dock on the left of the open notch;
+    // the other styles keep it as a top horizontal pill bar.
+    ui.pager.set_orientation(if studio {
+        gtk::Orientation::Horizontal
+    } else {
+        gtk::Orientation::Vertical
+    });
+    ui.pager.set_spacing(if studio { 10 } else { 4 });
+    ui.nav_bar.set_orientation(if studio {
+        gtk::Orientation::Vertical
+    } else {
+        gtk::Orientation::Horizontal
+    });
+    ui.nav_bar.set_valign(if studio {
+        gtk::Align::Center
+    } else {
+        gtk::Align::Fill
+    });
+
+    // Home page layout:
+    // - island: vertical centered stack (clock on top, stats below, actions centered)
+    // - studio: modular Bento cards with left vertical nav dock
+    // - default / hud: clock on left, stats on right, actions below
+    ui.home_head.set_orientation(if island {
+        gtk::Orientation::Vertical
+    } else {
+        gtk::Orientation::Horizontal
+    });
+    ui.home_head.set_spacing(if island {
+        8
+    } else if studio {
+        10
+    } else {
+        18
+    });
+    ui.home_body.set_spacing(if studio { 8 } else { 10 });
+    let align = if island { 0.5 } else { 0.0 };
+    ui.clock.set_xalign(align);
+    ui.date.set_xalign(align);
+    let halign = if island {
+        gtk::Align::Center
+    } else {
+        gtk::Align::Fill
+    };
+    ui.clock_box.set_halign(halign);
+    ui.stats_box.set_halign(if island {
+        gtk::Align::Center
+    } else {
+        gtk::Align::Fill
+    });
+    ui.home_actions.set_halign(if island || studio {
+        gtk::Align::Center
+    } else {
+        gtk::Align::Start
+    });
+
+    // Media page layout:
+    // - island: centered cover and track text, prominent pill controls
+    // - studio: bento media card + docked controls pill
+    // - default / hud: 56px cover on the left, left-aligned track text
+    ui.art
+        .set_pixel_size(if island || studio { 64 } else { 56 });
+    ui.media_body.set_spacing(if studio { 8 } else { 10 });
+    ui.head.set_orientation(if island {
+        gtk::Orientation::Vertical
+    } else {
+        gtk::Orientation::Horizontal
+    });
+    ui.head.set_spacing(if island { 6 } else { 12 });
+    ui.title.set_xalign(align);
+    ui.artist.set_xalign(align);
+    ui.media_text.set_halign(halign);
+
+    refresh_compact(ui, &state.borrow());
 }
 
 /// Pages left to right, as the arrows walk them.

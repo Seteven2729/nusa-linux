@@ -1,7 +1,7 @@
 #!/bin/sh
 # Screenshot the notch in a given state, using only fake data.
 #
-#   tools/shot.sh <out.png> "<NUSA_DEMO spec>" [--music] [--theme <name>]
+#   tools/shot.sh <out.png> "<NUSA_DEMO spec>" [--music] [--theme <name>] [--ui <name>]
 #   tools/shot.sh /tmp/lyrics.png "page=media,lyrics" --music
 #
 # NUSA_DEMO options are documented on `fn demo` in src/main.rs. The run uses a temporary
@@ -14,10 +14,12 @@ spec=$2
 shift 2
 music=0
 theme=nusa
+ui=default
 while [ $# -gt 0 ]; do
     case $1 in
         --music) music=1 ;;
         --theme) theme=$2; shift ;;
+        --ui) ui=$2; shift ;;
     esac
     shift
 done
@@ -41,7 +43,7 @@ mkdir -p "$tmp/config/nusa" "$tmp/pictures/Screenshots" "$tmp/downloads"
 # A theme is only visible without the cover/wallpaper tint on top of it.
 follow=true
 [ "$theme" != nusa ] && follow=false
-printf '[colors]\ntheme = "%s"\nfollow_cover = %s\nfollow_wallpaper = %s\n' "$theme" "$follow" "$follow" > "$tmp/config/nusa/config.toml"
+printf 'ui = "%s"\n[colors]\ntheme = "%s"\nfollow_cover = %s\nfollow_wallpaper = %s\n' "$ui" "$theme" "$follow" "$follow" > "$tmp/config/nusa/config.toml"
 printf 'XDG_PICTURES_DIR="%s"\nXDG_DOWNLOAD_DIR="%s"\n' "$tmp/pictures" "$tmp/downloads" > "$tmp/config/user-dirs.dirs"
 
 [ "$was_active" = 1 ] && systemctl --user stop nusa-linux.service
