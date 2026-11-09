@@ -62,6 +62,7 @@ pub(crate) fn migrate_autostart() {
 pub(crate) enum TrayMsg {
     Minimal(bool),
     Mascot(bool),
+    Glass(bool),
     UiStyle(usize),
     Theme(usize),
     Reload,
@@ -75,6 +76,7 @@ pub(crate) struct Tray {
     theme: usize,
     minimal: bool,
     mascot: bool,
+    glass: bool,
     tx: async_channel::Sender<TrayMsg>,
 }
 
@@ -136,6 +138,16 @@ impl ksni::Tray for Tray {
                 activate: Box::new(|t: &mut Self| {
                     t.mascot = !t.mascot;
                     let _ = t.tx.send_blocking(TrayMsg::Mascot(t.mascot));
+                }),
+                ..Default::default()
+            }
+            .into(),
+            CheckmarkItem {
+                label: tr("Kaca buram", "Frosted glass").into(),
+                checked: self.glass,
+                activate: Box::new(|t: &mut Self| {
+                    t.glass = !t.glass;
+                    let _ = t.tx.send_blocking(TrayMsg::Glass(t.glass));
                 }),
                 ..Default::default()
             }
@@ -235,6 +247,7 @@ pub(crate) fn spawn_tray(app: &gtk::Application, ui: &Ui, state: &Shared) {
             .unwrap_or(0),
         minimal: state.borrow().minimal,
         mascot: !state.borrow().mascot_off,
+        glass: state.borrow().glass,
         tx,
     })
     .spawn()
@@ -254,11 +267,16 @@ pub(crate) fn spawn_tray(app: &gtk::Application, ui: &Ui, state: &Shared) {
                 }
                 TrayMsg::Mascot(on) => {
                     save_setting("mascot", on);
-                    let off = matches!(on, false);
+                    let off = !on;
                     state.borrow_mut().mascot_off = off;
                     if off {
                         set_mood(&ui, &state, Mood::None);
                     }
+                }
+                TrayMsg::Glass(on) => {
+                    save_setting("glass", on);
+                    state.borrow_mut().glass = on;
+                    refresh_compact(&ui, &state.borrow());
                 }
                 TrayMsg::UiStyle(i) => {
                     if let Some(name) = UI_STYLES.get(i) {

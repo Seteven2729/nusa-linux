@@ -58,8 +58,8 @@ Warna notch ikut cover lagu saat musik diputar, dan ikut wallpaper saat idle. Se
 - Halaman Screenshots: 5 screenshot terbaru dari `~/Pictures/Screenshots`. Seret thumbnail ke aplikasi lain, klik untuk membuka, × untuk menyembunyikan dari daftar (file tidak dihapus). Setiap screenshot baru memunculkan thumbnail sebentar di notch.
 - Halaman Mixer: slider volume dan tombol bisu untuk output utama maupun untuk setiap aplikasi yang sedang memutar suara
 - Kalau ada lebih dari satu player (misalnya Strawberry dan browser), tombol `⇄` di halaman Media memilih player yang dikontrol. Pilihan itu bertahan sampai player-nya ditutup.
-- Tema warna (`nusa`, `midnight`, `rose`, `forest`, atau `custom`), gaya UI di dalam notch (`default`, `island`, `hud`, atau `studio`), dan bahasa tampilan (Indonesia atau Inggris)
-- Menu tray: start with login, minimal notch (garis tipis), maskot, gaya UI, tema, edit settings, reload, exit
+- Tema warna (`nusa`, `midnight`, `rose`, `forest`, atau `custom`), gaya UI di dalam notch (`default`, `island`, `hud`, atau `studio`), efek kaca buram (`glass` dengan Wayland background blur), dan bahasa tampilan (Indonesia atau Inggris)
+- Menu tray: start with login, minimal notch (garis tipis), maskot, kaca buram (frosted glass), gaya UI, tema, edit settings, reload, exit
 - Hidup lagi sendiri kalau crash (systemd user service)
 
 ## Gesture
@@ -184,6 +184,7 @@ Semua setting ada di `~/.config/nusa/config.toml`, yang dibuat otomatis saat per
 Yang bisa diatur:
 
 - Bahasa tampilan: `language = "id"` atau `"en"`
+- Efek kaca buram: `glass = true` atau `false` (material semi-transparan dengan `backdrop-filter` Wayland blur), yang juga bisa di-toggle langsung dari menu tray, Kaca buram, tanpa reload
 - Fitur mana saja yang aktif: lirik, romanisasi, gesture, statistik, clipboard, mikrofon, kamera dan share layar, mixer, screenshot, notifikasi HP, download, baterai, Wi-Fi, Bluetooth
 - Berapa detik idle sebelum maskot muncul dan tertidur
 - Gaya UI di dalam notch (`ui`): `"default"` (editorial), `"island"` (kapsul bulat terpusat), `"hud"` (monospace sudut tegas), atau `"studio"` (kartu Bento dengan dock navigasi di sisi kiri), yang juga bisa dipilih langsung dari menu tray, Gaya UI, tanpa reload

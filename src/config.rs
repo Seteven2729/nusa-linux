@@ -14,6 +14,8 @@ language = "id"
 minimal = false
 # Eyes that appear when you're idle. Also toggled from the tray.
 mascot = true
+# Translucent frosted glass material and Wayland background blur. Also toggled from the tray.
+glass = true
 # UI style inside the notch: "default", "island", "hud", or "studio". Also picked from the tray.
 ui = "default"
 
@@ -52,6 +54,7 @@ pub(crate) struct Config {
     pub(crate) english: bool,
     pub(crate) minimal: bool,
     pub(crate) mascot: bool,
+    pub(crate) glass: bool,
     pub(crate) ui: &'static str,
     pub(crate) lyrics: bool,
     pub(crate) romanize: bool,
@@ -165,6 +168,7 @@ fn parse_config(text: &str) -> Config {
             .and_then(|i| i.as_bool())
             .unwrap_or(false),
         mascot: flag("", "mascot"),
+        glass: flag("", "glass"),
         ui: item("", "ui")
             .and_then(|i| {
                 let s = i.as_str()?;
@@ -325,7 +329,7 @@ pub(crate) fn save_setting(key: &str, on: bool) {
 #[test]
 fn config_parsing() {
     let c = parse_config(TEMPLATE);
-    assert!(!c.minimal && c.mascot && c.lyrics && c.follow_wallpaper);
+    assert!(!c.minimal && c.mascot && c.glass && c.lyrics && c.follow_wallpaper);
     assert_eq!((c.mascot_awake, c.mascot_sleep), (30, 180));
     assert_eq!(c.gradient[0], "#020510");
     assert!(!c.english && c.mixer);

@@ -131,6 +131,7 @@ struct State {
     /// Mascot head bob while music plays: flips between up and down on the beat timer.
     bob: bool,
     mascot_off: bool,
+    glass: bool,
     /// Romanized lyric lines, same order as `lyrics`; None where a line needs none.
     lyrics_rom: Vec<Option<String>>,
     /// Previous (busy, total) jiffies from /proc/stat, for the CPU percentage.
@@ -208,6 +209,7 @@ fn build_ui(app: &gtk::Application) {
             .build();
         p.set_overflow(gtk::Overflow::Hidden);
         p.set_valign(gtk::Align::Center);
+        p.set_halign(gtk::Align::Center);
         p
     };
     let mini_art = picture(20, "mini-art");
@@ -798,6 +800,7 @@ fn build_ui(app: &gtk::Application) {
     let state: Shared = Rc::new(RefCell::new(State {
         minimal: cfg().minimal,
         mascot_off: !cfg().mascot,
+        glass: cfg().glass,
         timer_mins: 25,
         ..Default::default()
     }));
@@ -1329,6 +1332,8 @@ fn demo(ui: &Ui, state: &Shared) {
                     state.borrow_mut().timer_rem = secs.parse().unwrap_or(1500);
                 }
                 _ if opt == "mascot" => set_mood(&ui, &state, Mood::Awake),
+                _ if opt == "glass" => state.borrow_mut().glass = true,
+                _ if opt == "noglass" => state.borrow_mut().glass = false,
                 _ => {}
             }
         }
@@ -1450,7 +1455,7 @@ fn refresh_compact(ui: &Ui, st: &State) {
     // Gradient source: album cover while a track is on, wallpaper when idle, else the config colors.
     let tinted = has_track && cfg().follow_cover && ui.art.paintable().is_some();
     let wall = !has_track && cfg().follow_wallpaper;
-    for (class, on) in [("tinted", tinted), ("wall", wall)] {
+    for (class, on) in [("glass", st.glass), ("tinted", tinted), ("wall", wall)] {
         if on {
             ui.notch.add_css_class(class);
         } else {

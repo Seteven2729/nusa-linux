@@ -182,6 +182,55 @@ progressbar.stat-bar.hot progress { background: #ff9f0a; }
 }
 .notch.ui-studio .title.clock { font-size: 34px; font-weight: 800; letter-spacing: -1.2px; }
 .notch.ui-studio progressbar.stat-bar trough, .notch.ui-studio progressbar.stat-bar progress { min-height: 6px; border-radius: 3px; }
+
+/* Frosted glass material (Apple Design §12: translucent depth, diagonal sheen, specular rim, hierarchy & vibrancy) */
+.notch.glass {
+  backdrop-filter: blur(28px) saturate(190%) brightness(1.1);
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.09) 42%, rgba(255,255,255,0.03) 75%, rgba(255,255,255,0.10) 100%),
+    linear-gradient(160deg, alpha({GRAD1}, 0.24) 0%, alpha({GRAD2}, 0.30) 65%, alpha({GRAD3}, 0.36) 100%);
+  border: 1px solid rgba(255,255,255,0.34); border-top: none;
+  box-shadow:
+    inset 0 -1px 0 rgba(255,255,255,0.28),
+    inset 1px 0 0 rgba(255,255,255,0.18),
+    inset -1px 0 0 rgba(255,255,255,0.18);
+}
+.notch.glass.ui-hud {
+  border-color: rgba(255,255,255,0.36);
+  box-shadow:
+    inset 0 -1px 0 alpha({ACCENT}, 0.45),
+    inset 1px 0 0 rgba(255,255,255,0.22),
+    inset -1px 0 0 rgba(255,255,255,0.22);
+}
+.notch.glass.thin { backdrop-filter: none; border: none; box-shadow: none; }
+.notch.glass .compact, .notch.glass .title, .notch.glass .stat-val, .notch.glass .lyric {
+  text-shadow: 0 1px 3px rgba(0,0,0,0.55);
+}
+.notch.glass .artist, .notch.glass .time, .notch.glass .section, .notch.glass .stat-lbl {
+  color: rgba(255,255,255,0.88);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.45);
+}
+.notch.glass .page-nav, .notch.glass .timer-group, .notch.glass.ui-studio .clock-card, .notch.glass.ui-studio .stats-card, .notch.glass.ui-studio .media-card, .notch.glass.ui-studio .buttons-dock {
+  background: linear-gradient(145deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.06) 100%);
+  border: 1px solid rgba(255,255,255,0.24);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22);
+}
+.notch.glass button.page-pill.active, .notch.glass button.panel-toggle:checked {
+  background: rgba(255,255,255,0.28);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.35);
+}
+.notch.glass button.clip, .notch.glass button.player-switch {
+  background: rgba(255,255,255,0.14);
+  border: 1px solid rgba(255,255,255,0.24);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22);
+}
+.notch.glass button.clip:hover, .notch.glass button.player-switch:hover {
+  background: rgba(255,255,255,0.24);
+}
+.notch.glass scale trough, .notch.glass progressbar.stat-bar trough, .notch.glass progressbar.dl trough {
+  background: rgba(255,255,255,0.26);
+}
 ";
 
 /// The stylesheet with its {TOKENS} replaced by the theme's colors.

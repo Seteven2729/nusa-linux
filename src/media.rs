@@ -400,17 +400,18 @@ pub(crate) fn ambient_css(class: &str, (r, g, b): (u8, u8, u8)) -> String {
     let (gr, gg, gb) = (lift(r, 155, 18), lift(g, 155, 18), lift(b, 155, 18));
     let (hr, hg, hb) = (lift(r, 190, 65), lift(g, 190, 65), lift(b, 190, 65));
     format!(
-        ".notch.{class} {{ background: radial-gradient(circle at 44px 48px, rgba({gr},{gg},{gb},0.62) 0%, rgba({r},{g},{b},0.28) 46%, transparent 78%), linear-gradient(160deg, {} 0%, rgb({},{},{}) 58%, rgb({},{},{}) 100%); }} \
+        ".notch.{class} {{ background: radial-gradient(circle at 44px 48px, rgba({gr},{gg},{gb},0.62) 0%, rgba({r},{g},{b},0.28) 46%, transparent 78%), linear-gradient(160deg, {g0} 0%, rgb({r1},{g1},{b1}) 58%, rgb({r2},{g2},{b2}) 100%); }} \
+         .notch.glass.{class} {{ background: linear-gradient(145deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.09) 42%, rgba(255,255,255,0.03) 75%, rgba(255,255,255,0.10) 100%), radial-gradient(circle at 44px 48px, rgba({gr},{gg},{gb},0.28) 0%, rgba({r},{g},{b},0.12) 46%, transparent 78%), linear-gradient(160deg, alpha({g0}, 0.22) 0%, rgba({r1},{g1},{b1},0.28) 58%, rgba({r2},{g2},{b2},0.34) 100%); }} \
          .notch.{class} .eq > box, .notch.{class} progressbar.song-trace progress {{ background: rgb({hr},{hg},{hb}); }} \
          .notch.{class} .lrc.now {{ border-left-color: rgb({hr},{hg},{hb}); }} \
          .notch.{class} .lrc.now .lrc-rom {{ color: rgb({hr},{hg},{hb}); }}",
-        cfg().gradient[0],
-        r / 4,
-        g / 4,
-        b / 4,
-        scale(r, 3, 4),
-        scale(g, 3, 4),
-        scale(b, 3, 4),
+        g0 = cfg().gradient[0],
+        r1 = r / 4,
+        g1 = g / 4,
+        b1 = b / 4,
+        r2 = scale(r, 3, 4),
+        g2 = scale(g, 3, 4),
+        b2 = scale(b, 3, 4),
     )
 }
 
@@ -480,5 +481,9 @@ pub(crate) fn accent_is_dark_and_keeps_hue() {
     let (r, g, b) = accent_color(&red, 3, 6, 2);
     assert!(r == 110 && g < 20 && b < 20, "{r} {g} {b}");
     let css = ambient_css("tinted", (r, g, b));
-    assert!(css.contains("radial-gradient") && css.contains("song-trace"));
+    assert!(
+        css.contains("radial-gradient")
+            && css.contains(".notch.glass.tinted")
+            && css.contains("song-trace")
+    );
 }

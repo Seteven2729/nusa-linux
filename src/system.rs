@@ -276,7 +276,7 @@ pub(crate) fn spawn_download_watch(ui: &Ui, state: &Shared) {
                 live.push((target.to_owned(), meta.len(), modified));
                 true
             });
-            live.sort_by(|a, b| b.2.cmp(&a.2));
+            live.sort_by_key(|a| std::cmp::Reverse(a.2));
             let latest = live.first().map(|(name, bytes, _)| {
                 (
                     name.clone(),
@@ -422,7 +422,7 @@ fn recent_downloads(dir: &std::path::Path, n: usize) -> Vec<(PathBuf, u64, std::
             Some((e.path(), meta.len(), meta.modified().ok()?))
         })
         .collect();
-    files.sort_by(|a, b| b.2.cmp(&a.2));
+    files.sort_by_key(|a| std::cmp::Reverse(a.2));
     files.truncate(n);
     files
 }
