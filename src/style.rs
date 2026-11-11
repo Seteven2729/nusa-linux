@@ -185,10 +185,9 @@ progressbar.stat-bar.hot progress { background: #ff9f0a; }
 
 /* Frosted glass material (Apple Design §12: translucent depth, diagonal sheen, specular rim, hierarchy & vibrancy) */
 .notch.glass {
-  backdrop-filter: blur(28px) saturate(190%) brightness(1.1);
   background:
-    linear-gradient(145deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.09) 42%, rgba(255,255,255,0.03) 75%, rgba(255,255,255,0.10) 100%),
-    linear-gradient(160deg, alpha({GRAD1}, 0.24) 0%, alpha({GRAD2}, 0.30) 65%, alpha({GRAD3}, 0.36) 100%);
+    linear-gradient(145deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 42%, rgba(255,255,255,0.02) 75%, rgba(255,255,255,0.08) 100%),
+    linear-gradient(160deg, alpha({GRAD1}, 0.18) 0%, alpha({GRAD2}, 0.24) 65%, alpha({GRAD3}, 0.28) 100%);
   border: 1px solid rgba(255,255,255,0.34); border-top: none;
   box-shadow:
     inset 0 -1px 0 rgba(255,255,255,0.28),
@@ -202,7 +201,7 @@ progressbar.stat-bar.hot progress { background: #ff9f0a; }
     inset 1px 0 0 rgba(255,255,255,0.22),
     inset -1px 0 0 rgba(255,255,255,0.22);
 }
-.notch.glass.thin { backdrop-filter: none; border: none; box-shadow: none; }
+.notch.glass.thin { border: none; box-shadow: none; }
 .notch.glass .compact, .notch.glass .title, .notch.glass .stat-val, .notch.glass .lyric {
   text-shadow: 0 1px 3px rgba(0,0,0,0.55);
 }

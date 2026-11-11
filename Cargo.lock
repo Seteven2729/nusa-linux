@@ -939,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "nusa-linux"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "async-channel",
  "futures-util",

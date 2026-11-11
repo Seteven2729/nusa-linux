@@ -143,6 +143,9 @@ pub(crate) fn clear_player(ui: &Ui, state: &Shared) {
         st.lyrics_rom.clear();
         st.lyric_idx = None;
     }
+    ui.art.set_paintable(None::<&gtk::gdk::Texture>);
+    ui.mini_art.set_paintable(None::<&gtk::gdk::Texture>);
+    ui.art.set_visible(false);
     ui.lyrics_list.remove_all();
     refresh_compact(ui, &state.borrow());
 }
@@ -186,8 +189,26 @@ pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
         / 1_000_000;
 
     let playing = status == "Playing";
+    let changed = {
+        let mut st = state.borrow_mut();
+        st.playing = playing;
+        let changed = st.track != title;
+        if changed {
+            st.track = title.clone();
+            st.art_url.clear();
+            st.lyrics.clear();
+            st.lyrics_rom.clear();
+            st.lyric_idx = None;
+            ui.art.set_paintable(None::<&gtk::gdk::Texture>);
+            ui.mini_art.set_paintable(None::<&gtk::gdk::Texture>);
+            ui.art.set_visible(false);
+            ui.lyric.set_label("");
+            ui.lyrics_list.remove_all();
+        }
+        changed
+    };
     let art_url = str_of("mpris:artUrl");
-    if state.borrow().art_url != art_url {
+    if !art_url.is_empty() && state.borrow().art_url != art_url {
         state.borrow_mut().art_url = art_url.clone();
         let (ui, state) = (ui.clone(), state.clone());
         glib::spawn_future_local(async move {
@@ -196,25 +217,23 @@ pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
                 .await
                 .ok()
                 .flatten();
-            if let Some((_, _, _, rgb)) = &cover {
-                ui.accent.load_from_string(&ambient_css("tinted", *rgb));
-            }
             if state.borrow().art_url != art_url {
                 return; // track changed while loading
             }
-            let tex = cover.map(|(pixels, alpha, stride, _)| {
+            if let Some((pixels, alpha, stride, rgb)) = cover {
+                ui.accent.load_from_string(&ambient_css("tinted", rgb));
                 let format = if alpha {
                     gtk::gdk::MemoryFormat::R8g8b8a8
                 } else {
                     gtk::gdk::MemoryFormat::R8g8b8
                 };
-                gtk::gdk::MemoryTexture::new(112, 112, format, &pixels, stride)
-                    .upcast::<gtk::gdk::Texture>()
-            });
-            ui.art.set_paintable(tex.as_ref());
-            ui.mini_art.set_paintable(tex.as_ref());
-            ui.art.set_visible(tex.is_some());
-            refresh_compact(&ui, &state.borrow());
+                let tex = gtk::gdk::MemoryTexture::new(112, 112, format, &pixels, stride)
+                    .upcast::<gtk::gdk::Texture>();
+                ui.art.set_paintable(Some(&tex));
+                ui.mini_art.set_paintable(Some(&tex));
+                ui.art.set_visible(true);
+                refresh_compact(&ui, &state.borrow());
+            }
         });
     }
     state.borrow_mut().track_id = meta
@@ -241,21 +260,6 @@ pub(crate) async fn refresh_player(ui: &Ui, state: &Shared) {
     } else {
         "media-playback-start-symbolic"
     });
-
-    let changed = {
-        let mut st = state.borrow_mut();
-        st.playing = playing;
-        let changed = st.track != title;
-        if changed {
-            st.track = title.clone();
-            st.lyrics.clear();
-            st.lyrics_rom.clear();
-            st.lyric_idx = None;
-            ui.lyric.set_label("");
-            ui.lyrics_list.remove_all();
-        }
-        changed
-    };
     refresh_compact(ui, &state.borrow());
 
     if changed && !title.is_empty() {
@@ -401,7 +405,7 @@ pub(crate) fn ambient_css(class: &str, (r, g, b): (u8, u8, u8)) -> String {
     let (hr, hg, hb) = (lift(r, 190, 65), lift(g, 190, 65), lift(b, 190, 65));
     format!(
         ".notch.{class} {{ background: radial-gradient(circle at 44px 48px, rgba({gr},{gg},{gb},0.62) 0%, rgba({r},{g},{b},0.28) 46%, transparent 78%), linear-gradient(160deg, {g0} 0%, rgb({r1},{g1},{b1}) 58%, rgb({r2},{g2},{b2}) 100%); }} \
-         .notch.glass.{class} {{ background: linear-gradient(145deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.09) 42%, rgba(255,255,255,0.03) 75%, rgba(255,255,255,0.10) 100%), radial-gradient(circle at 44px 48px, rgba({gr},{gg},{gb},0.28) 0%, rgba({r},{g},{b},0.12) 46%, transparent 78%), linear-gradient(160deg, alpha({g0}, 0.22) 0%, rgba({r1},{g1},{b1},0.28) 58%, rgba({r2},{g2},{b2},0.34) 100%); }} \
+         .notch.glass.{class} {{ background: linear-gradient(145deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 42%, rgba(255,255,255,0.02) 75%, rgba(255,255,255,0.08) 100%), radial-gradient(circle at 44px 48px, rgba({gr},{gg},{gb},0.22) 0%, rgba({r},{g},{b},0.08) 46%, transparent 78%), linear-gradient(160deg, alpha({g0}, 0.16) 0%, rgba({r1},{g1},{b1},0.22) 58%, rgba({r2},{g2},{b2},0.26) 100%); }} \
          .notch.{class} .eq > box, .notch.{class} progressbar.song-trace progress {{ background: rgb({hr},{hg},{hb}); }} \
          .notch.{class} .lrc.now {{ border-left-color: rgb({hr},{hg},{hb}); }} \
          .notch.{class} .lrc.now .lrc-rom {{ color: rgb({hr},{hg},{hb}); }}",
@@ -461,7 +465,7 @@ pub(crate) fn accent_color(px: &[u8], channels: usize, stride: usize, size: usiz
     ((r * k) as u8, (g * k) as u8, (b * k) as u8)
 }
 
-/// Cover image bytes from an MPRIS artUrl (file:// from local players, https:// from browsers).
+/// Cover image bytes from an MPRIS artUrl (file:// from local players, https:// or data: from browsers).
 pub(crate) fn load_art(url: &str) -> Option<Vec<u8>> {
     if url.starts_with("http") {
         let mut resp = ureq::get(url).call().ok()?;
@@ -470,6 +474,9 @@ pub(crate) fn load_art(url: &str) -> Option<Vec<u8>> {
             .limit(10 << 20)
             .read_to_vec()
             .ok()
+    } else if let Some(rest) = url.strip_prefix("data:") {
+        let (_, b64) = rest.split_once(";base64,")?;
+        Some(glib::base64_decode(b64))
     } else {
         std::fs::read(gio::File::for_uri(url).path()?).ok()
     }
@@ -485,5 +492,9 @@ pub(crate) fn accent_is_dark_and_keeps_hue() {
         css.contains("radial-gradient")
             && css.contains(".notch.glass.tinted")
             && css.contains("song-trace")
+    );
+    assert_eq!(
+        load_art("data:image/png;base64,aGVsbG8=").as_deref(),
+        Some(b"hello".as_slice())
     );
 }
