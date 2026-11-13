@@ -419,9 +419,11 @@ pub(crate) fn ambient_css(class: &str, (r, g, b): (u8, u8, u8)) -> String {
     )
 }
 
+pub(crate) type SquareCover = (glib::Bytes, bool, usize, (u8, u8, u8));
+
 /// Center-crop a cover to a square and shrink it to 112px, 2x the largest size we draw.
 /// Returns raw pixels (Pixbuf itself can't cross threads): (bytes, has_alpha, rowstride, accent rgb).
-pub(crate) fn square_cover(bytes: &[u8]) -> Option<(glib::Bytes, bool, usize, (u8, u8, u8))> {
+pub(crate) fn square_cover(bytes: &[u8]) -> Option<SquareCover> {
     let loader = gtk::gdk_pixbuf::PixbufLoader::new();
     loader.write(bytes).ok()?;
     loader.close().ok()?;

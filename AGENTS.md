@@ -1,12 +1,19 @@
 # nusa-linux
 
-Notch overlay for Wayland desktops, in Rust with GTK4 and gtk4-layer-shell. Each `src/*.rs` opens with a `//!` line naming what it owns. Build, test, install and release steps live in `README.md`.
+Notch overlay for Wayland desktops, in Rust with GTK4 and gtk4-layer-shell. Each `src/*.rs` opens with a `//!` line naming what it owns. Build, test, install and release steps live in `README.md`. Review rules live in `CODING_STANDARDS.md`.
+
+## Module map
+
+- `src/main.rs` — widget tree, notch open/close state machine, UI layout classes (`apply_ui_class`), Wayland blur sync, `fn demo`.
+- `src/style.rs` — all GTK CSS rules, color themes, `.notch.glass` material, `ext-background-effect-v1` FFI.
+- `src/config.rs` & `src/tray.rs` — `config.toml` schema/defaults and StatusNotifierItem tray menu toggles.
+- `src/media.rs` — MPRIS metadata, async cover art loader, ambient cover tinting (`ambient_css`), equalizer.
 
 ## Testing against fakes
 
 The user runs Nusa all day as the systemd user service `nusa-linux.service` and plays music in Strawberry. Test with fakes so their session stays exactly as it was:
 
-- Screenshot any notch state: `tools/shot.sh <out.png> "<NUSA_DEMO spec>" [--music] [--theme <name>]`. It uses a temporary config and folders, and stops and restarts the service itself.
+- Screenshot any notch state: `tools/shot.sh <out.png> "<NUSA_DEMO spec>" [--music] [--theme <name>] [--ui <name>] [--glass|--noglass]`. It uses a temporary config and folders, and stops and restarts the service itself. Read `<out.png>` before deleting it in a later turn.
 - Ad-hoc runs use a debug build (`cargo build`) with `XDG_CONFIG_HOME=<temp dir>`, `NUSA_ONLY_PLAYER=fake`, `NUSA_DEMO=...` (options on `fn demo` in `src/main.rs`) and `tools/fake_player.py`. Release builds ignore these variables.
 - Before changing an app's volume, playback or settings, confirm by name that it is the fake one.
 - After `systemctl --user stop nusa-linux.service`, start it again before finishing.
@@ -20,6 +27,10 @@ The user runs Nusa all day as the systemd user service `nusa-linux.service` and 
 - When asked to commit and push, always cut a release: if visuals or features changed, update `README.md` and retake any changed `docs/screenshots/*.png` via `tools/shot.sh` first; then bump `version` in `Cargo.toml`, commit, create tag `v<version>`, and push both `master` and the tag to `repo` (README, section "Rilis versi baru"). CI commits the PKGBUILD bump after each release, so `git pull` before the next commit.
 
 ## Agent skills
+
+### Notch & UI design
+
+When asked to use the notch or UI design skill (frosted glass, Dynamic Island, HUD, motion, layout polish), load `apple-design` (`~/.agents/skills/apple-design/SKILL.md`) and `emil-design-eng` (`~/.agents/skills/emil-design-eng/SKILL.md`).
 
 ### Issue tracker
 

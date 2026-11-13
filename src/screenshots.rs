@@ -38,7 +38,7 @@ fn newest_images(dir: &std::path::Path, n: usize) -> Vec<PathBuf> {
         })
         .filter_map(|p| Some((p.metadata().ok()?.modified().ok()?, p)))
         .collect();
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|a| std::cmp::Reverse(a.0));
     files.into_iter().take(n).map(|(_, p)| p).collect()
 }
 

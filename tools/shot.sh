@@ -1,7 +1,7 @@
 #!/bin/sh
 # Screenshot the notch in a given state, using only fake data.
 #
-#   tools/shot.sh <out.png> "<NUSA_DEMO spec>" [--music] [--theme <name>] [--ui <name>]
+#   tools/shot.sh <out.png> "<NUSA_DEMO spec>" [--music] [--theme <name>] [--ui <name>] [--glass|--noglass]
 #   tools/shot.sh /tmp/lyrics.png "page=media,lyrics" --music
 #
 # NUSA_DEMO options are documented on `fn demo` in src/main.rs. The run uses a temporary
@@ -15,11 +15,14 @@ shift 2
 music=0
 theme=nusa
 ui=default
+glass=true
 while [ $# -gt 0 ]; do
     case $1 in
         --music) music=1 ;;
         --theme) theme=$2; shift ;;
         --ui) ui=$2; shift ;;
+        --glass) glass=true ;;
+        --noglass) glass=false ;;
     esac
     shift
 done
@@ -43,7 +46,7 @@ mkdir -p "$tmp/config/nusa" "$tmp/pictures/Screenshots" "$tmp/downloads"
 # A theme is only visible without the cover/wallpaper tint on top of it.
 follow=true
 [ "$theme" != nusa ] && follow=false
-printf 'ui = "%s"\n[colors]\ntheme = "%s"\nfollow_cover = %s\nfollow_wallpaper = %s\n' "$ui" "$theme" "$follow" "$follow" > "$tmp/config/nusa/config.toml"
+printf 'ui = "%s"\nglass = %s\n[colors]\ntheme = "%s"\nfollow_cover = %s\nfollow_wallpaper = %s\n' "$ui" "$glass" "$theme" "$follow" "$follow" > "$tmp/config/nusa/config.toml"
 printf 'XDG_PICTURES_DIR="%s"\nXDG_DOWNLOAD_DIR="%s"\n' "$tmp/pictures" "$tmp/downloads" > "$tmp/config/user-dirs.dirs"
 
 [ "$was_active" = 1 ] && systemctl --user stop nusa-linux.service
@@ -53,11 +56,11 @@ if [ "$music" = 1 ]; then
     python3 -I "$root/tools/fake_player.py" --title "Let's not fall in love" --artist BIGBANG \
         --length 211 --cover "$tmp/cover.png" --identity Spotify & pids="$pids $!"
 fi
-sleep 1.5
+sleep 0.8
 
 XDG_CONFIG_HOME="$tmp/config" NUSA_ONLY_PLAYER=fake NUSA_DEMO="$spec" \
     "$root/target/debug/nusa-linux" >/dev/null 2>&1 & pids="$pids $!"
-sleep 7
+sleep 2.5
 
 spectacle -b -n -f -o "$tmp/full.png" 2>/dev/null
 # Top-centre of a 1920-wide screen, trimmed to the notch, attached to the top edge.
